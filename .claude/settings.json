@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude_ai_Supabase__get_publishable_keys",
+      "PowerShell(npm install @supabase/supabase-js @supabase/ssr)",
+      "PowerShell(Remove-Item \".env.local\" -Confirm:$false)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -H \"apikey: sb_publishable_IOKrFaobdG9WSzk3tIrlZw_0GumNKpc\" -H \"Accept-Profile: app_routine_raccoon\" \"https://kvccsypvuoyycfoozcew.supabase.co/rest/v1/tasks?select=id&limit=1\")",
+      "Bash(node -e \"fetch\\('https://kvccsypvuoyycfoozcew.supabase.co/rest/v1/tasks?select=id&limit=1',{headers:{apikey:'sb_publishable_IOKrFaobdG9WSzk3tIrlZw_0GumNKpc','Accept-Profile':'app_routine_raccoon'}}\\).then\\(async r=>console.log\\(r.status, await r.text\\(\\)\\)\\).catch\\(e=>console.log\\('ERR',e.cause||e\\)\\)\")",
+      "PowerShell(Get-Item -Force .env.local | Select-Object Mode, Length, LastWriteTime; if \\(\\(Get-Item -Force .env.local\\).PSIsContainer\\) { \"IS DIRECTORY\" } else { \\(Get-Content .env.local\\) -replace '\\(KEY=\\).+', '$1<set>' })",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(Remove-Item __typecheck_tmp.ts -Confirm:$false)",
+      "PowerShell(npm run lint)",
+      "PowerShell(npm run build)",
+      "PowerShell(Rename-Item .env.local .env; \\(Get-Content .env\\) -replace '\\(KEY=sb_publishable_\\).+', '$1…'; git check-ignore -v .env)",
+      "PowerShell(npx eslint scripts/setup-env.mjs)",
+      "PowerShell(gh --version)",
+      "PowerShell(gh auth status)",
+      "PowerShell(git branch -a; git config --get credential.helper; git --version; \\(Get-Command winget -ErrorAction SilentlyContinue\\).Source)",
+      "PowerShell(winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements --silent)",
+      "PowerShell(& \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" --version)",
+      "PowerShell(& \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" auth status)",
+      "PowerShell($gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; & $gh auth status; & $gh repo list --limit 20 --json nameWithOwner,visibility,isEmpty)",
+      "PowerShell($env:GIT_TERMINAL_PROMPT='0'; $env:GCM_INTERACTIVE='never'; git ls-remote https://github.com/itsmemarie/routine-raccoon.git)",
+      "PowerShell(git branch -m master main)",
+      "PowerShell(git add -A)"
+    ]
+  }
+}
