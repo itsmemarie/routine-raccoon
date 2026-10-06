@@ -133,34 +133,34 @@ Static export can't serve dynamic segments for client-generated IDs, so entity I
 
 **Initial catalog** (the canonical list is `lib/errors/codes.ts` → `docs/ERROR_CODES.md`):
 
-| Area                               | Codes                                                                                                                                                                                                                                                                                                               |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| APP                                | 001 screen crashed · 002 background error · 003 page not found · 004 link missing a parameter · 005 newer version ready (chunk load) · 006 app misconfigured                                                                                                                                                        |
-| DB                                 | 001 can't open data · 002 couldn't save · 003 storage full · 004 data upgrade failed · 005 item no longer exists · 006 unreadable saved data (row skipped)                                                                                                                                                          |
-| NET                                | 001 offline · 002 timed out · 003 rate limited · 004 server error                                                                                                                                                                                                                                                   |
-| SYNC                               | 001 push failed · 002 pull failed · 003 server refused a change (quarantined) · 004 combining copies failed                                                                                                                                                                                                         |
-| AUTH                               | 001 wrong email/password · 002 too many tries · 003 code invalid/expired · 004 sign in again · 005 Google sign-in failed · 006 email check unavailable · 007 account deletion failed · 008 accounts not configured in this build · 009 password too weak · 010 couldn't send the code · 011 check the email address |
-| VAL                                | 001 name required · 002 minutes 1–600 · 003 only YouTube/TikTok links · 004 invalid time · 005 primary plan protected · 006 plan has no sections · 007 a section needs a Day Plan · 008 can't be the primary · 009 all levels taken · 010 pick a section                                                            |
-| IMP                                | 001 nothing to add · 002 paste too long (200 lines)                                                                                                                                                                                                                                                                 |
-| MED · TMR · NTF · PLAT · EXP · AST | MED-001 video failed · TMR-001 timer alert not set · NTF-001 notifications off · NTF-002 reminders not scheduled · PLAT-001 not available here · EXP-001 export failed · AST-001 daily limit · AST-002 drafting unavailable                                                                                         |
+| Area                               | Codes                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| APP                                | 001 screen crashed · 002 background error · 003 page not found · 004 link missing a parameter · 005 newer version ready (chunk load) · 006 app misconfigured                                                                                                                                                                                      |
+| DB                                 | 001 can't open data · 002 couldn't save · 003 storage full · 004 data upgrade failed · 005 item no longer exists · 006 unreadable saved data (row skipped)                                                                                                                                                                                        |
+| NET                                | 001 offline · 002 timed out · 003 rate limited · 004 server error                                                                                                                                                                                                                                                                                 |
+| SYNC                               | 001 push failed · 002 pull failed · 003 server refused a change (quarantined) · 004 combining copies failed                                                                                                                                                                                                                                       |
+| AUTH                               | 001 wrong email/password · 002 too many tries · 003 code invalid/expired · 004 sign in again · 005 Google sign-in failed · 006 email check unavailable · 007 account deletion failed · 008 accounts not configured in this build · 009 password too weak · 010 couldn't send the code · 011 check the email address · 012 sign in again to delete |
+| VAL                                | 001 name required · 002 minutes 1–600 · 003 only YouTube/TikTok links · 004 invalid time · 005 primary plan protected · 006 plan has no sections · 007 a section needs a Day Plan · 008 can't be the primary · 009 all levels taken · 010 pick a section                                                                                          |
+| IMP                                | 001 nothing to add · 002 paste too long (200 lines)                                                                                                                                                                                                                                                                                               |
+| MED · TMR · NTF · PLAT · EXP · AST | MED-001 video failed · TMR-001 timer alert not set · NTF-001 notifications off · NTF-002 reminders not scheduled · PLAT-001 not available here · EXP-001 export failed · AST-001 daily limit · AST-002 drafting unavailable                                                                                                                       |
 
 **Page → page-specific codes** (every page can also show the common set: APP-001/002/005, DB-001/002/003/006, NET-001…004):
 
-| Page                                          | Specific codes                                              |
-| --------------------------------------------- | ----------------------------------------------------------- |
-| P00                                           | APP-006, DB-004                                             |
-| P01 Today                                     | DB-005, TMR-001, SYNC-001, VAL-001 (new plan name)          |
-| P02 Task detail                               | APP-004, DB-005, MED-001, TMR-001, VAL-006                  |
-| P03 Task form                                 | APP-004, DB-005, VAL-001…004, IMP-001, IMP-002, AST-001/002 |
-| P04 Section form                              | APP-004, DB-005, VAL-001, VAL-004                           |
-| P05 Sections manager                          | APP-004, DB-005, VAL-005, VAL-006                           |
-| P06 Settings                                  | VAL-001, VAL-004, VAL-005, NTF-001, NTF-002, EXP-001        |
-| P07 Progress · P09 Archive · P10 Day complete | DB-005                                                      |
-| P08 Log                                       | APP-004, DB-005                                             |
-| P11 Help · P12 Privacy                        | (common only)                                               |
-| P13 Auth                                      | AUTH-001…006, AUTH-008…011, SYNC-004                        |
-| P14 Account                                   | AUTH-004, AUTH-007, AUTH-008, SYNC-001…004, EXP-001         |
-| P15 Setup                                     | VAL-001, VAL-002                                            |
+| Page                                          | Specific codes                                                |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| P00                                           | APP-006, DB-004                                               |
+| P01 Today                                     | DB-005, TMR-001, SYNC-001, VAL-001 (new plan name)            |
+| P02 Task detail                               | APP-004, DB-005, MED-001, TMR-001, VAL-006                    |
+| P03 Task form                                 | APP-004, DB-005, VAL-001…004, IMP-001, IMP-002, AST-001/002   |
+| P04 Section form                              | APP-004, DB-005, VAL-001, VAL-004                             |
+| P05 Sections manager                          | APP-004, DB-005, VAL-005, VAL-006                             |
+| P06 Settings                                  | VAL-001, VAL-004, VAL-005, NTF-001, NTF-002, EXP-001          |
+| P07 Progress · P09 Archive · P10 Day complete | DB-005                                                        |
+| P08 Log                                       | APP-004, DB-005                                               |
+| P11 Help · P12 Privacy                        | (common only)                                                 |
+| P13 Auth                                      | AUTH-001…006, AUTH-008…011, SYNC-004                          |
+| P14 Account                                   | AUTH-004, AUTH-007, AUTH-008, AUTH-012, SYNC-001…004, EXP-001 |
+| P15 Setup                                     | VAL-001, VAL-002                                              |
 
 ### 1.6 Resilience patterns
 
@@ -219,7 +219,7 @@ Server conventions (enforced by the `stamp` trigger, `make_synced()` and grants)
 
 Until it is applied, `HARDENING_MIGRATION_APPLIED = false` in `data/sync/mapping.ts` keeps columns 3–4 local-only (never pushed, preserved on pull). After applying: flip the flag and regenerate `database.types.ts`.
 
-**Proposed migration** (`supabase/migrations/20261004120000_routine_raccoon_account_rpcs.sql`, _not applied_; needs approval): the two account RPCs in §2.7, a private rate-limit table, and owner-only DELETE policies used by `delete_my_data()` (clients still have no DELETE grant). The app already calls these RPCs and degrades to `RR-AUTH-006` / `RR-AUTH-007` while they are missing.
+**Proposed migration** (`supabase/migrations/20261004120000_routine_raccoon_account_rpcs.sql`, _not applied_; needs approval): the two account RPCs in §2.7, a private rate-limit table, and owner-only DELETE policies used by `delete_my_account()` (clients still have no DELETE grant). The app already calls these RPCs and degrades to `RR-AUTH-006` / `RR-AUTH-007` while they are missing.
 
 ### 2.2 JSON column contracts (`domain/schemas.ts`, parsed with Zod at every trust boundary: remote pull, import, schema upgrade; settings on every read)
 
@@ -317,14 +317,14 @@ The sync engine depends on a `SyncGateway` port. The adapters are `SupabaseGatew
 
 ### 2.7 Remote API surface
 
-| Endpoint                                         | Caller                        | Auth                                                                                                                      | Contract                                                                            |
-| ------------------------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| PostgREST: the 8 tables above                    | Sync engine only              | User JWT + RLS                                                                                                            | Typed by `lib/supabase/database.types.ts`                                           |
-| RPC `lookup_account(p_email)`                    | Auth screen (550 ms debounce) | Publishable key (`anon`); 10/min per IP, 5/min per email (sha256 buckets in a private table), else `PT429` → `RR-NET-003` | `{exists, providers[], firstName?}`, uniform ~100 ms timing                         |
-| RPC `delete_my_data()`                           | Account screen                | User JWT (`authenticated`)                                                                                                | Hard-deletes **this app's rows** for the caller. The login stays (see note)         |
-| Edge Function `assist-smaller-version` (Phase 3) | Task form                     | User JWT; `consume_assist_quota()`                                                                                        | `POST {task}` → `{name, minutes, steps, text}`. The Anthropic key stays server-side |
+| Endpoint                                         | Caller                        | Auth                                                                                                                                                                    | Contract                                                                                                                       |
+| ------------------------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| PostgREST: the 8 tables above                    | Sync engine only              | User JWT + RLS                                                                                                                                                          | Typed by `lib/supabase/database.types.ts`                                                                                      |
+| RPC `lookup_account(p_email)`                    | Auth screen (550 ms debounce) | Publishable key (`anon`); 10/min per IP, 5/min per email (sha256 buckets in a private table), else `PT429` → `RR-NET-003`                                               | `{exists, providers[], firstName?}`, uniform ~100 ms timing                                                                    |
+| RPC `delete_my_account()`                        | Account screen                | User JWT (`authenticated`) from a session **signed in within the last 10 minutes** (`auth.sessions.created_at` of the JWT's `session_id`), else `PT403` → `RR-AUTH-012` | One transaction: hard-deletes **this app's rows**, then the caller's login (`auth.users`; its sessions and identities cascade) |
+| Edge Function `assist-smaller-version` (Phase 3) | Task form                     | User JWT; `consume_assist_quota()`                                                                                                                                      | `POST {task}` → `{name, minutes, steps, text}`. The Anthropic key stays server-side                                            |
 
-> **Shared `auth.users`:** the project's logins are shared with the owner's other apps. "Delete account" therefore deletes the saved copy of the day (this app's data), signs out and forgets the link. It does not delete the login, which other apps use. A login made in another app also reads as "Account found" and can sign in here.
+> **Shared `auth.users`:** the project's logins are shared with the owner's other apps. By the owner's decision (6 Oct 2026), "Delete account" deletes the login too. Other apps' rows then follow their own foreign keys to `auth.users`: they cascade, or they block the delete, in which case nothing is deleted (`RR-AUTH-007`). The Account screen says so and asks for the typed word DELETE. A login made in another app also reads as "Account found" and can sign in here.
 
 The Phase 3 Edge Function returns one envelope: `{ ok: true, data } | { ok: false, error: { code: 'RR-…', message } }`, validated with Zod. CORS allows only `https://localhost` (Capacitor) and the staging origin.
 
@@ -386,7 +386,7 @@ sequenceDiagram
 - `make_synced()` makes it impossible to add a table without RLS. Every new table **must** go through it.
 - The shared project shares `auth.users` across apps. RLS keys on `user_id`, so rows never cross users.
 - pgTAP tests prove that user B can't read or modify user A's rows (§4).
-- Service-role/secret keys exist **only** in CI (and Phase 3 Edge Function secrets); never in the client bundle. The two account RPCs are `security definer` with a pinned `search_path` and act only on `auth.uid()`.
+- Service-role/secret keys exist **only** in CI (and Phase 3 Edge Function secrets); never in the client bundle. The two account RPCs are `security definer` with a pinned `search_path` and act only on `auth.uid()`; deleting the login also needs a fresh sign-in.
 
 ### 3.3 Encryption
 
@@ -437,7 +437,7 @@ sequenceDiagram
 
 - No analytics and no third-party trackers.
 - Sentry 11 runs with `dataCollection` fully off (no user info, cookies, headers, bodies or query params), no session replay, and a `beforeSend` scrubber. Task names, notes and emails never leave the device in telemetry; codes and stack traces do.
-- Export (portability) and Delete account (erasure of this app's data, hard delete) satisfy GDPR for this app. Deleting the shared login is a separate, manual step (§2.7 note). Data stays in the EU region.
+- Export (portability) and Delete account (erasure: this app's data and the login, hard delete) satisfy GDPR. Data stays in the EU region.
 - The privacy copy is rewritten per the handoff: data lives on the phone; an optional account saves a copy to the server; nothing is shared.
 
 ### 3.8 Supply chain

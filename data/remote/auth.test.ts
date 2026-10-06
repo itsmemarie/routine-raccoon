@@ -5,7 +5,7 @@ import { err, ok } from "@/lib/errors/result";
 import {
   accountUserFrom,
   currentUser,
-  deleteSavedCopy,
+  deleteAccount,
   exchangeOAuthCode,
   lookupEmail,
   mapAuthError,
@@ -264,7 +264,7 @@ describe("auth gateway", () => {
     expect(bad.ok ? null : bad.error.code).toBe("RR-AUTH-005");
   });
 
-  it("sign out, delete the saved copy, current user", async () => {
+  it("sign out, delete the account, current user", async () => {
     auth.signOut.mockResolvedValueOnce({ error: null });
     expect((await signOut()).ok).toBe(true);
     expect(auth.signOut).toHaveBeenCalledWith({ scope: "local" });
@@ -272,11 +272,17 @@ describe("auth gateway", () => {
     expect((await signOut()).ok).toBe(false);
 
     rpc.mockResolvedValueOnce({ data: null, error: null });
-    expect((await deleteSavedCopy()).ok).toBe(true);
-    expect(rpc).toHaveBeenCalledWith("delete_my_data");
+    expect((await deleteAccount()).ok).toBe(true);
+    expect(rpc).toHaveBeenCalledWith("delete_my_account");
     rpc.mockResolvedValueOnce({ data: null, error: { message: "boom" } });
-    const failed = await deleteSavedCopy();
+    const failed = await deleteAccount();
     expect(failed.ok ? null : failed.error.code).toBe("RR-AUTH-007");
+    rpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "PT403", message: "RR-AUTH-012: sign in again to delete your account" },
+    });
+    const stale = await deleteAccount();
+    expect(stale.ok ? null : stale.error.code).toBe("RR-AUTH-012");
 
     auth.getSession.mockResolvedValueOnce({ data: { session: session() }, error: null });
     const current = await currentUser();

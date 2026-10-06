@@ -34,11 +34,12 @@ Every failure the user can see shows `RR-<AREA>-<NNN> · <PAGE>` (TECH_SPEC §1.
 | `RR-AUTH-004` | Please sign in again | Your session ended. Sign in to keep backing up. | warning | no | 401 / JWT expired / RLS 42501 for the current user. |
 | `RR-AUTH-005` | Google sign-in didn't finish | Google sign-in was cancelled or failed. Try again. | info | yes | Credential Manager cancelled or signInWithIdToken rejected the token/nonce. |
 | `RR-AUTH-006` | Couldn't check that email | We couldn't check the email right now. You can still continue. | warning | yes | auth-lookup Edge Function unavailable or rate limited. |
-| `RR-AUTH-007` | Couldn't delete the account | Nothing was deleted. Try again. | error | yes | account-delete Edge Function failed. |
+| `RR-AUTH-007` | Couldn't delete the account | Nothing was deleted. Try again. | error | yes | RPC delete_my_account failed (network, missing migration, or another app's foreign key blocked deleting the login). The transaction rolled back. |
 | `RR-AUTH-008` | Accounts aren't set up in this build | Your day works fully on this phone. Account backup isn't available in this build. | info | no | NEXT_PUBLIC_SUPABASE_URL / _PUBLISHABLE_KEY not set. |
 | `RR-AUTH-009` | Password too weak | Use at least 10 characters with a number or a symbol. | info | no | Supabase weak_password, or the client rules in domain/auth.ts. |
 | `RR-AUTH-010` | Couldn't send the code | The email didn't go out. Wait a minute, then try again. | warning | yes | over_email_send_rate_limit or SMTP failure on signUp / resend / resetPasswordForEmail. |
 | `RR-AUTH-011` | Check the email address | That email doesn't look right. Check it and try again. | info | no | domain/auth.ts isValidEmail rejected the input before calling the server. |
+| `RR-AUTH-012` | Sign in again to delete | For your safety, deleting your account needs a fresh sign-in. Sign in again, then delete within 10 minutes. Nothing was deleted. | warning | no | delete_my_account requires the JWT's session (auth.sessions.created_at) to be under 10 minutes old. |
 | `RR-VAL-001` | Name needed | Give it a name first. | info | no | Empty or whitespace-only name (tasks, sections, plans). |
 | `RR-VAL-002` | Time out of range | Pick between 1 and 600 minutes. | info | no | tasks.minutes check constraint is 1–600. |
 | `RR-VAL-003` | Video link not supported | Only YouTube and TikTok links can play inside the app. | info | no | domain/video.ts allowlist rejected the URL. |
@@ -80,5 +81,5 @@ Common to every page: `RR-APP-001`, `RR-APP-002`, `RR-APP-005`, `RR-DB-001`, `RR
 | P11 | `/help` | Help | — |
 | P12 | `/privacy` | Privacy | — |
 | P13 | `/auth` | Sign in | `RR-AUTH-001`, `RR-AUTH-002`, `RR-AUTH-003`, `RR-AUTH-004`, `RR-AUTH-005`, `RR-AUTH-006`, `RR-AUTH-008`, `RR-SYNC-004` |
-| P14 | `/account` | Account | `RR-AUTH-004`, `RR-AUTH-007`, `RR-AUTH-008`, `RR-SYNC-001`, `RR-SYNC-002`, `RR-SYNC-003`, `RR-SYNC-004`, `RR-EXP-001` |
+| P14 | `/account` | Account | `RR-AUTH-004`, `RR-AUTH-007`, `RR-AUTH-008`, `RR-AUTH-012`, `RR-SYNC-001`, `RR-SYNC-002`, `RR-SYNC-003`, `RR-SYNC-004`, `RR-EXP-001` |
 | P15 | `/setup` | Setup | `RR-VAL-001`, `RR-VAL-002` |

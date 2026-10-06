@@ -1,7 +1,8 @@
 -- ════════════════════════════════════════════════════════════════════════════════════════
 -- Routine Raccoon account RPCs (TECH_SPEC §2.7). PROPOSED: not yet applied to production.
 -- Replaces the planned Edge Functions `auth-lookup` and `account-delete`: two SQL functions
--- need no deployment, no service-role key and no CORS setup.
+-- need no deployment, no service-role key and no CORS setup. Deletes the caller's login
+-- (auth.users) on request: see delete_my_account below.
 -- After applying: nothing to flip in the app (it already calls these RPCs and falls back
 -- gracefully while they are missing: RR-AUTH-006 / RR-AUTH-007).
 -- Expand-only: new private table, new functions, new delete policies (clients still have no
@@ -98,9 +99,13 @@ $$;
 revoke all on function app_routine_raccoon.lookup_account(text) from public;
 grant execute on function app_routine_raccoon.lookup_account(text) to anon, authenticated;
 
--- "Delete account" = remove the saved copy (GDPR erasure for this app). The auth user is NOT
--- deleted: auth.users is shared with the owner's other apps in this project, and deleting it
--- would cascade into their data. Rows are removed only for the calling user.
+-- "Delete account" (owner's decision, 6 Oct 2026): removes every Routine Raccoon row of the
+-- caller AND their login. auth.users is shared with the owner's other apps in this project, so
+-- deleting the login also affects them: their rows follow their own foreign keys (cascade, or
+-- block the delete). The app says so and asks for a typed confirmation first.
+-- Safeguard: only from a session created in the last 10 minutes (a fresh sign-in), so an
+-- unlocked phone or a stolen refresh token can't delete the login. All or nothing: if the
+-- login can't be deleted, the app's rows stay too.
 do $$
 declare
   t text;
@@ -117,7 +122,7 @@ begin
 end;
 $$;
 
-create or replace function app_routine_raccoon.delete_my_data()
+create or replace function app_routine_raccoon.delete_my_account()
 returns void
 language plpgsql
 security definer
@@ -125,10 +130,21 @@ set search_path = ''
 as $$
 declare
   uid uuid := auth.uid();
+  sid text := auth.jwt() ->> 'session_id';
+  signed_in_at timestamptz;
 begin
   if uid is null then
     raise exception 'not authenticated' using errcode = '42501';
   end if;
+  if sid is not null and sid ~ '^[0-9a-fA-F-]{36}$' then
+    select s.created_at into signed_in_at
+    from auth.sessions s
+    where s.id = sid::uuid and s.user_id = uid;
+  end if;
+  if signed_in_at is null or signed_in_at < now() - interval '10 minutes' then
+    raise exception 'RR-AUTH-012: sign in again to delete your account' using errcode = 'PT403';
+  end if;
+
   delete from app_routine_raccoon.log_entries where user_id = uid;
   delete from app_routine_raccoon.task_occurrences where user_id = uid;
   delete from app_routine_raccoon.day_records where user_id = uid;
@@ -138,7 +154,9 @@ begin
   delete from app_routine_raccoon.day_plans where user_id = uid;
   delete from app_routine_raccoon.user_settings where user_id = uid;
   delete from app_routine_raccoon_private.assist_usage where user_id = uid;
+  -- The login last; its sessions, identities and refresh tokens cascade inside auth.
+  delete from auth.users where id = uid;
 end;
 $$;
-revoke all on function app_routine_raccoon.delete_my_data() from public, anon;
-grant execute on function app_routine_raccoon.delete_my_data() to authenticated;
+revoke all on function app_routine_raccoon.delete_my_account() from public, anon;
+grant execute on function app_routine_raccoon.delete_my_account() to authenticated;

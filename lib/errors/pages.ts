@@ -101,6 +101,7 @@ export const PAGES = {
       "RR-AUTH-004",
       "RR-AUTH-007",
       "RR-AUTH-008",
+      "RR-AUTH-012",
       "RR-SYNC-001",
       "RR-SYNC-002",
       "RR-SYNC-003",

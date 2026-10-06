@@ -262,7 +262,8 @@ export const ERROR_CODES = {
     userMessage: "Nothing was deleted. Try again.",
     severity: "error",
     retryable: true,
-    devHint: "account-delete Edge Function failed.",
+    devHint:
+      "RPC delete_my_account failed (network, missing migration, or another app's foreign key blocked deleting the login). The transaction rolled back.",
   },
   "RR-AUTH-008": {
     area: "AUTH",
@@ -297,6 +298,16 @@ export const ERROR_CODES = {
     severity: "info",
     retryable: false,
     devHint: "domain/auth.ts isValidEmail rejected the input before calling the server.",
+  },
+  "RR-AUTH-012": {
+    area: "AUTH",
+    title: "Sign in again to delete",
+    userMessage:
+      "For your safety, deleting your account needs a fresh sign-in. Sign in again, then delete within 10 minutes. Nothing was deleted.",
+    severity: "warning",
+    retryable: false,
+    devHint:
+      "delete_my_account requires the JWT's session (auth.sessions.created_at) to be under 10 minutes old.",
   },
 
   // ── VAL: input validation (shown inline with the code) ───────────────────────────────

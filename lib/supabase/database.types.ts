@@ -281,8 +281,8 @@ export type Database = {
         Args: { p_email: string };
         Returns: Json;
       };
-      /** Deletes every app_routine_raccoon row of the calling user (same migration). */
-      delete_my_data: {
+      /** Deletes the calling user's app_routine_raccoon rows and login (same migration). */
+      delete_my_account: {
         Args: Record<PropertyKey, never>;
         Returns: undefined;
       };

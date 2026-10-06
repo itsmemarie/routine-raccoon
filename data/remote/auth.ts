@@ -257,14 +257,18 @@ export function signOut(): Promise<Result<void, AppError>> {
 }
 
 /**
- * Removes the saved copy: every Routine Raccoon row of this user, server side (RPC
- * `delete_my_data`). The sign-in itself is shared with the owner's other apps in this
- * Supabase project, so it is deliberately left alone (TECH_SPEC §3.7).
+ * Deletes the account: every Routine Raccoon row of this user and the login itself, in one
+ * server transaction (RPC `delete_my_account`, TECH_SPEC §2.7). The login is shared with the
+ * owner's other apps; the Account screen says so before calling this. The server only accepts
+ * a session signed in within the last 10 minutes → RR-AUTH-012 (sign in again).
  */
-export function deleteSavedCopy(): Promise<Result<void, AppError>> {
+export function deleteAccount(): Promise<Result<void, AppError>> {
   return call("RR-AUTH-007", async (supabase) => {
-    const { error } = await supabase.rpc("delete_my_data");
-    if (error) throw new AppError("RR-AUTH-007", { cause: error });
+    const { error } = await supabase.rpc("delete_my_account");
+    if (!error) return;
+    throw new AppError(error.message.includes("RR-AUTH-012") ? "RR-AUTH-012" : "RR-AUTH-007", {
+      cause: error,
+    });
   });
 }
 

@@ -14,12 +14,13 @@ import { defaultContext } from "@/data/commands/context";
 import { useClock } from "@/data/hooks/use-day-key";
 import { useKv } from "@/data/hooks/use-kv";
 import { useOrganisation } from "@/data/hooks/use-organisation";
-import { deleteSavedCopy, signOut } from "@/data/remote/auth";
+import { deleteAccount, signOut } from "@/data/remote/auth";
 import { useSession } from "@/data/remote/session";
 import { syncNow, useSyncStatus } from "@/data/sync/runtime";
 import { formatRelative } from "@/domain/time";
 import { AppError } from "@/lib/errors/app-error";
 import { ExportSheet, showToast, useRun } from "@/features/common";
+import { DeleteAccountDialog } from "./delete-account-dialog";
 import { useLinkAccount } from "./use-link-account";
 
 const PAGE = "P14" as const;
@@ -38,6 +39,7 @@ export function AccountScreen() {
   const [confirm, setConfirm] = useState<"sign-out" | "delete" | null>(null);
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<AppError | null>(null);
   const linking = useLinkAccount(
     PAGE,
     useCallback(() => undefined, []),
@@ -95,20 +97,34 @@ export function AccountScreen() {
 
   const doDelete = async () => {
     setBusy(true);
+    setDeleteError(null);
+    const deleted = await deleteAccount();
+    if (!deleted.ok) {
+      // Shown in the dialog, with its code; RR-AUTH-012 turns the button into "Sign in again".
+      setDeleteError(deleted.error);
+      return setBusy(false);
+    }
     const ctx = defaultContext();
-    const deleted = await run(deleteSavedCopy());
-    if (!deleted.ok) return setBusy(false);
     await run(
       logAccountEvent(ctx, {
         event: "deleted",
-        detail: `${user.email} · saved copy removed`,
+        detail: `${user.email} · backup and login deleted`,
         provider: user.provider,
       }),
     );
     await run(forgetAccount(ctx));
-    await run(signOut(), { success: "Your saved copy is deleted. The day on this phone stays." });
+    // The server session went with the login; this only clears it on the phone.
+    await signOut();
+    showToast("Your account is deleted. The day on this phone stays.");
     setBusy(false);
+    setConfirm(null);
     router.replace("/settings/");
+  };
+
+  // A fresh sign-in lets the delete through (the server wants one from the last 10 minutes).
+  const signInAgain = async () => {
+    await run(signOut());
+    router.replace(`/auth/?email=${encodeURIComponent(user.email)}`);
   };
 
   const backupLine =
@@ -247,14 +263,16 @@ export function AccountScreen() {
         />
       ) : null}
       {confirm === "delete" ? (
-        <ConfirmDialog
-          title="Delete your account?"
-          body="The saved copy of your day is removed from the server for good. The day on this phone stays, and so does your sign-in for other apps."
-          confirmLabel="Delete account"
-          onCancel={() => setConfirm(null)}
-          onConfirm={() => {
+        <DeleteAccountDialog
+          email={user.email}
+          pageId={PAGE}
+          busy={busy}
+          error={deleteError}
+          onConfirm={() => void doDelete()}
+          onSignInAgain={() => void signInAgain()}
+          onCancel={() => {
             setConfirm(null);
-            void doDelete();
+            setDeleteError(null);
           }}
         />
       ) : null}

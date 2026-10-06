@@ -88,7 +88,8 @@ export function AuthScreen() {
   const session = useSession();
   const ids = { email: useId(), password: useId(), name: useId() };
 
-  const [email, setEmail] = useState(params.get("reset") ?? "");
+  // ?email= pre-fills the address (Account → "Sign in again" before deleting).
+  const [email, setEmail] = useState(params.get("reset") ?? params.get("email") ?? "");
   const [status, setStatus] = useState<Status>("idle");
   const [firstName, setFirstName] = useState<string | null>(null);
   const [password, setPasswordValue] = useState("");
