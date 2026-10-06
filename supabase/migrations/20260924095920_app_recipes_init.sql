@@ -1,0 +1,3 @@
+-- Applied to the shared "Master of Projects" project by another app (app_recipes).
+-- Intentionally empty here: it keeps this repo's migration history consistent with the
+-- remote so `supabase db push` works (TECH_SPEC §5.3). Do not add SQL to this file.

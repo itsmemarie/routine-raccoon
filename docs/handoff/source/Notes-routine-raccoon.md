@@ -1,0 +1,27 @@
+- The name of the app is Routine Raccoon  
+- Make drag and drop easier between sections and tasks, it feels clunky  
+- Add new section should be visible on main pages  
+- Inside new task:  
+  - When adding a new task, add ability to add a new section  
+  - Repeats needs to be like google calendar has organised repeats  
+  - Allow for multiple hard tasks  
+  - Keep all information fields open on the page  
+  - Smaller Version of the Nope day needs some work:   
+- Use my Claude account to autofill in the smaller versions of the nope days based on what I put in the main one for the rough, bad and very bad. Afterwards, I can edit it. Claude should use psychology to help naming the tasks and filling out the fields.  
+- Inside the note to self, I want the youtube or tiktok video to be embedded so I dont leave the app  
+- Inside the note to self, the first line as an instruction is \- Done is better than perfect. I can feel embarrassed and still do this.   
+- On Today screen, add a filter that I can either filter by difficulty, or select all tasks with certain times or under certain times  
+- Click into fields to edit them  
+- Open and close sections to hide or show them  
+- Do a button called “Extra Support” where when you click it, it opens up a new page and shows the unfinished subtasks of tasks that are longer than 20 minutes for example but you will be able to adjust this in settings  
+- Nope Day, there are two types of days (first when you have no time, the second when you are feeling bad):  
+  - Rough/ Bad/ Very Bad is not a good description, i dont understand it-- instead try something like  
+    - Level 1: Bare minimum (No time Today)  
+    - Level 2: Bad Day (Not Feeling Today)  
+    - Level 3: Very Day (Zero Energy)  
+- Nope Day need to be in the settings  
+- Inside Nope Days, inside the tasks, there is a toggle that this belongs to 60% version  
+  - Rename to Nope Day  
+  - Add another toggle to show which Nope Day Level  
+  - Give another toggle style on frequency
+

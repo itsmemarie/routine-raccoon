@@ -1,0 +1,13 @@
+.next
+out
+coverage
+android
+playwright-report
+test-results
+node_modules
+package-lock.json
+docs/handoff
+docs/ERROR_CODES.md
+supabase/migrations
+supabase/.temp
+.claude

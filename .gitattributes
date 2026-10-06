@@ -1,0 +1,7 @@
+# Keep LF everywhere (Prettier checks it; Windows git would otherwise convert to CRLF).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.woff2 binary

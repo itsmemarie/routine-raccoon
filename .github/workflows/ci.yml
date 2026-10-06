@@ -1,0 +1,99 @@
+# Every PR and push to main (TECH_SPEC §5.3). All gates must pass to merge.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck · lint · unit · build · E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - name: Error-code docs are current
+        run: npm run errors:check
+      - name: Unit, component, integration and architecture tests (coverage gates)
+        run: npm run test:coverage
+      - name: Static export (test build, fault injection ON)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_APP_ENV: staging
+          NEXT_PUBLIC_ENABLE_FAULTS: "1"
+          NEXT_PUBLIC_SEED_DEMO: "1"
+          NEXT_TELEMETRY_DISABLED: "1"
+      - run: npx playwright install --with-deps chromium
+      - name: E2E (every route's error code, Today flows, axe)
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            playwright-report
+            coverage
+          retention-days: 14
+
+  production-build:
+    name: Production build (faults OFF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_APP_ENV: production
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+          NEXT_PUBLIC_APP_VERSION: ${{ github.sha }}
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Fault injection is compiled out of production
+        run: |
+          if grep -rqF 'NEXT_PUBLIC_ENABLE_FAULTS:"1"' out/; then echo "RR-APP-006: fault injection leaked into production" && exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-out
+          path: out
+          retention-days: 7
+
+  security:
+    name: Dependency audit · secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: npm audit (runtime dependencies, high and above)
+        run: npm audit --omit=dev --audit-level=high
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,52 @@
+# Supabase CLI config for the LOCAL stack (`supabase start`) used in development and CI
+# (TECH_SPEC §5.1). Production is the shared "Master of Projects" project; its settings are
+# managed in the dashboard and must match the [auth] values below.
+project_id = "routine-raccoon"
+
+[api]
+enabled = true
+port = 54321
+# The app only talks to its own schema.
+schemas = ["public", "graphql_public", "app_routine_raccoon"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[db.seed]
+enabled = false
+
+[studio]
+enabled = false
+
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "https://localhost"
+additional_redirect_urls = ["http://localhost:3000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+minimum_password_length = 10
+# The app asks for 10+ characters with a number or a symbol (domain/auth.ts); a stricter
+# server rule would reject passwords the form accepts.
+password_requirements = ""
+
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+otp_length = 6
+otp_expiry = 600
+max_frequency = "30s"
+
+[auth.external.google]
+enabled = false
+client_id = "env(SUPABASE_AUTH_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_GOOGLE_SECRET)"
+skip_nonce_check = false
+

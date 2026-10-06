@@ -10,13 +10,7 @@
 // - Rows are soft-deleted via `deleted_at`; there is no DELETE grant.
 // - `user_id` defaults to auth.uid() and cannot be changed.
 
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[];
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
@@ -167,11 +161,7 @@ type UserSettingsRow = {
   server_updated_at: string;
 };
 
-type Table<
-  Row,
-  Optional extends keyof Row,
-  Relationships extends unknown[] = [],
-> = {
+type Table<Row, Optional extends keyof Row, Relationships extends unknown[] = []> = {
   Row: Row;
   Insert: InsertOf<Row, Optional>;
   Update: Partial<Row>;
@@ -283,6 +273,19 @@ export type Database = {
         Args: { daily_limit?: number };
         Returns: boolean;
       };
+      /**
+       * Email-first sign-in hint: { exists, providers[], first_name }. Rate limited per IP and
+       * per email (migration 20261004120000_routine_raccoon_account_rpcs, pending approval).
+       */
+      lookup_account: {
+        Args: { p_email: string };
+        Returns: Json;
+      };
+      /** Deletes every app_routine_raccoon row of the calling user (same migration). */
+      delete_my_data: {
+        Args: Record<PropertyKey, never>;
+        Returns: undefined;
+      };
     };
     Enums: {
       [_ in never]: never;
@@ -296,7 +299,5 @@ export type Database = {
 type AppSchema = Database["app_routine_raccoon"];
 
 export type Tables<T extends keyof AppSchema["Tables"]> = AppSchema["Tables"][T]["Row"];
-export type TablesInsert<T extends keyof AppSchema["Tables"]> =
-  AppSchema["Tables"][T]["Insert"];
-export type TablesUpdate<T extends keyof AppSchema["Tables"]> =
-  AppSchema["Tables"][T]["Update"];
+export type TablesInsert<T extends keyof AppSchema["Tables"]> = AppSchema["Tables"][T]["Insert"];
+export type TablesUpdate<T extends keyof AppSchema["Tables"]> = AppSchema["Tables"][T]["Update"];

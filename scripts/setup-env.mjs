@@ -70,9 +70,6 @@ const others = Object.entries(existing)
   .filter(([name]) => name !== URL_VAR && name !== KEY_VAR)
   .map(([name, value]) => `${name}=${value}`);
 
-writeFileSync(
-  ENV_FILE,
-  [`${URL_VAR}=${url}`, `${KEY_VAR}=${key}`, ...others].join("\n") + "\n",
-);
+writeFileSync(ENV_FILE, [`${URL_VAR}=${url}`, `${KEY_VAR}=${key}`, ...others].join("\n") + "\n");
 
 console.log(`\n✓ Saved to ${ENV_FILE}. Restart \`npm run dev\` if it's running.\n`);

@@ -1,0 +1,4 @@
+-- Routine Raccoon bootstrap, applied remotely on 24 Sep 2026 and superseded within minutes:
+-- 115518 created the tables in public/private, 115815 dropped them again (all were empty),
+-- and 115858 recreated everything in the app_routine_raccoon schema. Net effect: none.
+-- Kept as an empty placeholder so the local history matches the remote (TECH_SPEC §5.3).

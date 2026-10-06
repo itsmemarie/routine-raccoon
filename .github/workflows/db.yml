@@ -1,0 +1,54 @@
+# Database: test on every change, deploy to production only after approval (TECH_SPEC §5.3).
+# Secrets (environment "production"): SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_REF.
+name: Database
+
+on:
+  pull_request:
+    paths: ["supabase/**"]
+  push:
+    branches: [main]
+    paths: ["supabase/**"]
+
+concurrency:
+  group: db-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Migrations · RLS tests (pgTAP) · lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase start
+      - name: Apply every migration from scratch
+        run: supabase db reset
+      - name: RLS, last-write-wins, soft delete, clamp
+        run: supabase test db
+      - run: supabase db lint --schema app_routine_raccoon --level error
+
+  deploy:
+    name: Deploy to production (manual approval)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+      - name: Preview pending migrations
+        run: supabase db push --dry-run
+      - run: supabase db push
