@@ -1,5 +1,8 @@
 # Database: test on every change, deploy to production only after approval (TECH_SPEC §5.3).
 # Secrets (environment "production"): SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_REF.
+# Deploying is OFF until all three are true: the "production" environment exists with a required
+# reviewer (Settings → Environments), its secrets are set, and the repository variable
+# DB_DEPLOY_ENABLED is "true". Without the reviewer, GitHub would deploy with no approval.
 name: Database
 
 on:
@@ -35,7 +38,7 @@ jobs:
 
   deploy:
     name: Deploy to production (manual approval)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DB_DEPLOY_ENABLED == 'true'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 15
