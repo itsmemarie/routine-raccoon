@@ -12,9 +12,21 @@ permissions:
   contents: read
 
 jobs:
+  # hashFiles() isn't allowed in a job-level `if`, so a tiny job checks for the native shell.
+  shell:
+    name: Android shell present?
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: echo "ready=$([ -f android/gradlew ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   release:
     name: Build signed AAB → Play internal testing
-    if: ${{ hashFiles('android/gradlew') != '' }}
+    needs: shell
+    if: needs.shell.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
