@@ -3,7 +3,17 @@ import { onLocalWrite } from "@/data/events";
 import { occurrenceId } from "@/domain/ids";
 import { testContext } from "@/tests/db";
 import { ensureBaseline, SURVIVAL_PLAN_SEED } from "./baseline";
-import { pickPlan, pickSurvivalLevel, skipTaskToday, tickTask, untickTask } from "./day";
+import {
+  pickPlan,
+  pickSurvivalLevel,
+  skipSectionToday,
+  skipTaskToday,
+  tickTask,
+  toggleStep,
+  unskipSectionToday,
+  unskipTaskToday,
+  untickTask,
+} from "./day";
 
 const DAY = "2026-09-08";
 
@@ -116,6 +126,89 @@ describe("commands (integration, fake-indexeddb)", () => {
       await skipTaskToday(t.ctx, { taskId: back.id, dayKey: DAY });
       expect((await t.db.task_occurrences.get(occurrenceId(back.id, DAY)))?.status).toBe("skipped");
       expect(await t.db.log_entries.where("kind").equals("skipped").count()).toBe(1);
+    });
+
+    it("bringing a skipped task back makes it pending, keeps its steps and logs it", async () => {
+      const { byName } = await seeded();
+      const back = byName("Straighten your back");
+      await toggleStep(t.ctx, { taskId: back.id, dayKey: DAY, stepId: "s1", checked: true });
+      await skipTaskToday(t.ctx, { taskId: back.id, dayKey: DAY });
+      t.advance(1_000);
+      expect((await unskipTaskToday(t.ctx, { taskId: back.id, dayKey: DAY })).ok).toBe(true);
+      expect(await t.db.task_occurrences.get(occurrenceId(back.id, DAY))).toMatchObject({
+        status: "pending",
+        checked_step_ids: ["s1"],
+        _dirty: 1,
+      });
+      const titles = async () =>
+        (await t.db.log_entries.where("kind").equals("edited").toArray()).map((l) => l.title);
+      expect(await titles()).toEqual(["Brought back Straighten your back"]);
+      // Not skipped (any more): nothing to do, nothing logged.
+      expect((await unskipTaskToday(t.ctx, { taskId: back.id, dayKey: DAY })).ok).toBe(true);
+      expect(await titles()).toHaveLength(1);
+    });
+
+    it("skipping a section skips its open tasks, leaves ticked ones, and logs once", async () => {
+      const { byName } = await seeded();
+      const pint = byName("Drink a pint");
+      const morning = pint.section_id;
+      await tickTask(t.ctx, { taskId: pint.id, dayKey: DAY });
+
+      const result = await skipSectionToday(t.ctx, { sectionId: morning, dayKey: DAY });
+      expect(result.ok).toBe(true);
+      const skipped = result.ok ? result.value.taskIds : [];
+      expect(skipped.toSorted()).toEqual(
+        [byName("Eat something").id, byName("Straighten your back").id].toSorted(),
+      );
+      expect((await t.db.task_occurrences.get(occurrenceId(pint.id, DAY)))?.status).toBe("done");
+      const log = await t.db.log_entries.where("kind").equals("skipped").toArray();
+      expect(log.map((l) => [l.title, l.meta, l.section_id])).toEqual([
+        ["Skipped Morning", "2 tasks · today only", morning],
+      ]);
+
+      // Nothing open is left: a second skip changes nothing and logs nothing.
+      const again = await skipSectionToday(t.ctx, { sectionId: morning, dayKey: DAY });
+      expect(again).toEqual({ ok: true, value: { taskIds: [] } });
+      expect(await t.db.log_entries.where("kind").equals("skipped").count()).toBe(1);
+    });
+
+    it("Undo of a section skip brings back exactly those tasks; Bring back brings all", async () => {
+      const { byName } = await seeded();
+      const eat = byName("Eat something");
+      const morning = eat.section_id;
+      await skipTaskToday(t.ctx, { taskId: eat.id, dayKey: DAY });
+      const result = await skipSectionToday(t.ctx, { sectionId: morning, dayKey: DAY });
+      const taskIds = result.ok ? result.value.taskIds : [];
+      expect(taskIds).toHaveLength(2);
+
+      const undo = await unskipSectionToday(t.ctx, { sectionId: morning, dayKey: DAY, taskIds });
+      expect(undo).toEqual({ ok: true, value: { count: 2 } });
+      // Skipped on its own before the section was: still skipped.
+      expect((await t.db.task_occurrences.get(occurrenceId(eat.id, DAY)))?.status).toBe("skipped");
+
+      const all = await unskipSectionToday(t.ctx, { sectionId: morning, dayKey: DAY });
+      expect(all).toEqual({ ok: true, value: { count: 1 } });
+      expect((await t.db.task_occurrences.get(occurrenceId(eat.id, DAY)))?.status).toBe("pending");
+      const log = await t.db.log_entries.where("kind").equals("edited").toArray();
+      expect(log.map((l) => [l.title, l.meta])).toEqual([
+        ["Brought back Morning", "2 tasks · today"],
+        ["Brought back Morning", "1 task · today"],
+      ]);
+
+      // Nothing skipped: no entry.
+      await unskipSectionToday(t.ctx, { sectionId: morning, dayKey: DAY });
+      expect(await t.db.log_entries.where("kind").equals("edited").count()).toBe(2);
+    });
+
+    it("section skips fail with RR-DB-005 for a missing section", async () => {
+      await seeded();
+      const missing = "00000000-0000-4000-8000-000000000000";
+      const skip = await skipSectionToday(t.ctx, { sectionId: missing, dayKey: DAY });
+      const back = await unskipSectionToday(t.ctx, { sectionId: missing, dayKey: DAY });
+      for (const result of [skip, back]) {
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.code).toBe("RR-DB-005");
+      }
     });
 
     it("fails with RR-DB-005 for a missing task, writing nothing", async () => {

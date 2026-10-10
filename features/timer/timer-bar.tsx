@@ -4,11 +4,12 @@ import { Square } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
+import { useToastStore } from "@/components/ui/toast-store";
 import { defaultContext } from "@/data/commands/context";
-import { tickTask } from "@/data/commands/day";
+import { tickTask, untickTask } from "@/data/commands/day";
 import { markTimerAlerted } from "@/data/commands/timer";
 import { formatCountdown } from "@/domain/timer";
-import { showToast, useRun } from "@/features/common";
+import { useRun } from "@/features/common";
 import { useTimer, useTimerControls } from "./use-timer";
 
 /** Routes where the bar would cover a form footer or a full-screen moment. */
@@ -58,12 +59,19 @@ export function TimerBar() {
   const aboveTabs = TAB_ROUTES.includes(pathname);
 
   const tickAndStop = async () => {
-    const result = await run(
-      tickTask(defaultContext(), { taskId: timer.taskId, dayKey: timer.dayKey }),
-    );
+    const { taskId, dayKey, taskName: name } = timer;
+    const result = await run(tickTask(defaultContext(), { taskId, dayKey }));
     if (!result.ok) return;
     await stop({ quiet: true });
-    showToast(`Ticked ${timer.taskName}`);
+    // Same 5 s undo as ticking on Today (handoff "Tick, undo, day complete").
+    useToastStore.getState().show({
+      message: `Ticked ${name}`,
+      durationMs: 5000,
+      action: {
+        label: "Undo",
+        onPress: () => void run(untickTask(defaultContext(), { taskId, dayKey })),
+      },
+    });
   };
 
   return (

@@ -1,20 +1,27 @@
 import { Plus } from "lucide-react";
 import Link from "next/link";
+import type { MouseEvent } from "react";
 
 /** Red header: date, Add task, two-line headline (white + amber). Handoff screen 1. */
 export function TodayHeader({
   dateLabel,
   headline,
+  addTaskHref,
+  onAddTask,
 }: {
   dateLabel: string;
   headline: readonly [string, string];
+  addTaskHref: string;
+  /** Picks the section on screen at tap time. */
+  onAddTask: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   return (
     <header className="-mx-3.5 bg-primary px-[22px] pt-[18px] pb-16">
       <div className="flex items-center justify-between">
         <span className="text-[12.5px] font-semibold text-white/90">{dateLabel}</span>
         <Link
-          href="/task/edit/"
+          href={addTaskHref}
+          onClick={onAddTask}
           className="flex h-9 items-center gap-1.5 rounded-full bg-white px-[15px] text-[12.5px] font-bold text-primary"
         >
           <Plus size={15} strokeWidth={2.4} aria-hidden />

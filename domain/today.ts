@@ -72,6 +72,10 @@ export interface TodaySection {
   readonly section: Section;
   /** Visible tasks after the filter, ticked ones included (the UI animates them out). */
   readonly tasks: readonly TodayTask[];
+  /** Tasks skipped today that the filter shows, listed under "N skipped" to bring back. */
+  readonly skipped: readonly TodayTask[];
+  /** The section's tasks today by status, ignoring the filter. */
+  readonly counts: { readonly open: number; readonly done: number; readonly skipped: number };
   readonly remainingMinutes: number;
   /** Copy for a section with no tasks today, otherwise null. */
   readonly emptyText: string | null;
@@ -267,19 +271,37 @@ export function buildToday(input: TodayInput): TodayView {
   let extraSupportCount = 0;
   let doneCount = 0;
 
+  const toTodayTask = (r: PlanTaskRow): TodayTask => ({
+    task: r.task,
+    sectionName: r.section.name,
+    minutes: r.minutes,
+    fullMinutes: r.task.minutes,
+    shrunk: r.shrunk,
+    done: r.status === "done",
+    carried: r.carried,
+    showHardBadge: r.task.hard && !survivalOn,
+    showSurvivalBadge: r.shrunk,
+    meta: cardMeta(r.task, r.minutes, r.shrunk, r.carried),
+    openSteps: r.task.steps.filter((s) => !r.checked.has(s.id)),
+  });
+  const shown = (r: PlanTaskRow) => matchesFilter(filter, r.task, r.minutes, settings.longAt);
+
   const sections: TodaySection[] = grouped.map(({ section, rows }) => {
     const open = rows.filter((r) => r.status !== "skipped");
-    const visible = open.filter((r) => matchesFilter(filter, r.task, r.minutes, settings.longAt));
+    const skipped = rows.filter((r) => r.status === "skipped");
+    const visible = open.filter(shown);
     let sectionRemaining = 0;
+    let sectionDone = 0;
     for (const r of open) {
       if (r.status === "done") {
-        doneCount++;
+        sectionDone++;
         continue;
       }
       planOpenCount++;
       planOpenMinutes += r.minutes;
       if (isExtraSupport(r.task, r.minutes, settings.longAt)) extraSupportCount++;
     }
+    doneCount += sectionDone;
     for (const r of visible) {
       if (r.status === "done") continue;
       remainingCount++;
@@ -295,19 +317,9 @@ export function buildToday(input: TodayInput): TodayView {
           : survivalOn
             ? survivalEmptyText(activePlan?.name ?? "")
             : "Empty — drag a task in",
-      tasks: visible.map((r) => ({
-        task: r.task,
-        sectionName: section.name,
-        minutes: r.minutes,
-        fullMinutes: r.task.minutes,
-        shrunk: r.shrunk,
-        done: r.status === "done",
-        carried: r.carried,
-        showHardBadge: r.task.hard && !survivalOn,
-        showSurvivalBadge: r.shrunk,
-        meta: cardMeta(r.task, r.minutes, r.shrunk, r.carried),
-        openSteps: r.task.steps.filter((s) => !r.checked.has(s.id)),
-      })),
+      tasks: visible.map(toTodayTask),
+      skipped: skipped.filter(shown).map(toTodayTask),
+      counts: { open: open.length - sectionDone, done: sectionDone, skipped: skipped.length },
     };
   });
 
@@ -341,6 +353,33 @@ export function buildToday(input: TodayInput): TodayView {
     planOpenCount,
     doneCount,
   };
+}
+
+/**
+ * Every task the section has today was skipped (none open, none ticked): Today shows
+ * "Skipped for today" with Bring back.
+ * @see docs/handoff/README.md "Skip today"
+ */
+export function isSectionSkipped(view: Pick<TodaySection, "counts">): boolean {
+  return view.counts.skipped > 0 && view.counts.open === 0 && view.counts.done === 0;
+}
+
+/**
+ * Ids of a section's tasks on today's list that are still open, or that were skipped, ignoring
+ * the filter. Skipping a whole section and bringing it back act on exactly these.
+ */
+export function sectionTaskIds(
+  input: DayInput,
+  sectionId: string,
+  status: "open" | "skipped",
+): string[] {
+  const view = buildToday({ ...input, filter: "all" }).sections.find(
+    (s) => s.section.id === sectionId,
+  );
+  if (!view) return [];
+  return status === "open"
+    ? view.tasks.filter((t) => !t.done).map((t) => t.task.id)
+    : view.skipped.map((t) => t.task.id);
 }
 
 export interface PlanOption {

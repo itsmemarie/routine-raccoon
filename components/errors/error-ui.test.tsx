@@ -80,7 +80,7 @@ describe("error UI always shows the code and page ID", () => {
 describe("toasts", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    act(() => useToastStore.setState({ current: null }));
+    act(() => useToastStore.setState({ current: null, queue: [] }));
   });
   afterEach(() => vi.useRealTimers());
 
@@ -124,5 +124,56 @@ describe("toasts", () => {
     expect(screen.getByTestId("toast")).toHaveTextContent("B");
     act(() => useToastStore.getState().dismiss(-1, "timeout"));
     expect(screen.getByTestId("toast")).toHaveTextContent("B");
+  });
+
+  it("a message arriving during an undo window waits for it instead of hiding Undo", () => {
+    render(<Toaster />);
+    const onExpire = vi.fn();
+    act(() => {
+      useToastStore.getState().show({
+        message: "Ticked Shower",
+        durationMs: 5000,
+        action: { label: "Undo", onPress: vi.fn() },
+        onExpire,
+      });
+    });
+    act(() => toastError(new AppError("RR-AUTH-004"), "P00"));
+    act(() => {
+      useToastStore.getState().show({ message: "Saved" });
+    });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(onExpire).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(onExpire).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("RR-AUTH-004");
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getByTestId("toast")).toHaveTextContent("Saved");
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.queryByTestId("toast")).toBeNull();
+  });
+
+  it("a new undo replaces the old one; queued messages still show after it", () => {
+    render(<Toaster />);
+    const undo = (message: string) =>
+      useToastStore.getState().show({
+        message,
+        durationMs: 5000,
+        action: { label: "Undo", onPress: vi.fn() },
+      });
+    act(() => {
+      undo("Ticked Shower");
+      useToastStore.getState().show({ message: "Saved" });
+      undo("Ticked Teeth");
+    });
+    expect(screen.getByTestId("toast")).toHaveTextContent("Ticked Teeth");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByTestId("toast")).toHaveTextContent("Saved");
   });
 });

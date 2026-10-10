@@ -3,6 +3,8 @@ import {
   buildPlanOptions,
   buildToday,
   isExtraSupport,
+  isSectionSkipped,
+  sectionTaskIds,
   summariseDay,
   survivalEmptyText,
   type TodayInput,
@@ -112,6 +114,48 @@ describe("buildToday: normal day", () => {
       occurrences: [occurrence({ task_id: eat.id, day_key: DAY, status: "skipped" })],
     });
     expect(view.sections[0]?.tasks.map((t) => t.task.name)).toEqual(["Drink a pint"]);
+  });
+
+  it("lists skipped tasks per section and counts open / done / skipped ignoring the filter", () => {
+    const { input, pint, eat, dinner } = world();
+    const view = buildToday({
+      ...input,
+      filter: "hard",
+      occurrences: [
+        occurrence({ task_id: eat.id, day_key: DAY, status: "skipped", completed_at: null }),
+        occurrence({ task_id: pint.id, day_key: DAY }),
+        occurrence({ task_id: dinner.id, day_key: DAY, status: "skipped", completed_at: null }),
+      ],
+    });
+    const [morning, evening] = view.sections;
+    expect(morning?.counts).toEqual({ open: 0, done: 1, skipped: 1 });
+    // The filter (Hard) hides Eat something from the "N skipped" list, but not from the count.
+    expect(morning?.skipped).toEqual([]);
+    expect(evening?.counts).toEqual({ open: 0, done: 0, skipped: 1 });
+    expect(evening?.skipped.map((t) => [t.task.name, t.done])).toEqual([["Prepare dinner", false]]);
+    expect(view.remainingCount).toBe(0);
+  });
+
+  it("calls a section skipped only when every task it has today was skipped", () => {
+    expect(isSectionSkipped({ counts: { open: 0, done: 0, skipped: 2 } })).toBe(true);
+    expect(isSectionSkipped({ counts: { open: 0, done: 1, skipped: 2 } })).toBe(false);
+    expect(isSectionSkipped({ counts: { open: 1, done: 0, skipped: 2 } })).toBe(false);
+    expect(isSectionSkipped({ counts: { open: 0, done: 0, skipped: 0 } })).toBe(false);
+  });
+
+  it("finds a section's open and skipped task ids on today's list", () => {
+    const { input, morning, evening, pint, eat, travelling } = world();
+    const day = {
+      ...input,
+      occurrences: [occurrence({ task_id: eat.id, day_key: DAY, status: "skipped" })],
+    };
+    expect(sectionTaskIds(day, morning.id, "open")).toEqual([pint.id]);
+    expect(sectionTaskIds(day, morning.id, "skipped")).toEqual([eat.id]);
+    const ticked = { ...input, occurrences: [occurrence({ task_id: pint.id, day_key: DAY })] };
+    expect(sectionTaskIds(ticked, morning.id, "open")).toEqual([eat.id]);
+    // A section that isn't on today's plan has nothing to skip.
+    const away = { ...input, dayRecord: dayRecord({ day_key: DAY, plan_id: travelling.id }) };
+    expect(sectionTaskIds(away, evening.id, "open")).toEqual([]);
   });
 
   it("ignores deleted occurrences", () => {

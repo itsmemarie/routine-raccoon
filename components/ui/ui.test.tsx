@@ -12,7 +12,8 @@ import { canGoBack, NavigationTracker, resetNavigationStack, useBack } from "./n
 import { BackBar, FormBar, ScreenHeader, ScreenRoot } from "./screen";
 import { SettingsGroup, SettingsRow } from "./settings-row";
 import { Dialog, Sheet } from "./sheet";
-import { neighbourMove, SortableList } from "./sortable-list";
+import { TOUCH_DRAG_DELAY_MS } from "./drag-sensors";
+import { applyMove, neighbourMove, SortableList } from "./sortable-list";
 import { Switch, SwitchRow } from "./toggle";
 
 const router = { back: vi.fn(), replace: vi.fn(), push: vi.fn() };
@@ -411,6 +412,38 @@ describe("SortableList", () => {
     expect(neighbourMove(items, 2, -1)).toBe("a");
     expect(neighbourMove(items, 0, 1)).toBe("b");
     expect(neighbourMove(items, 2, 1)).toBeUndefined();
+  });
+
+  it("applies a move as 'put id right after afterId'", () => {
+    const ids = (list: readonly { id: string }[]) => list.map((i) => i.id).join("");
+    expect(ids(applyMove(items, "c", null))).toBe("cab");
+    expect(ids(applyMove(items, "a", "c"))).toBe("bca");
+    expect(ids(applyMove(items, "a", "b"))).toBe("bac");
+    expect(ids(applyMove(items, "b", "b"))).toBe("abc");
+    // Unknown ids leave the order alone.
+    expect(ids(applyMove(items, "x", null))).toBe("abc");
+    expect(ids(applyMove(items, "a", "x"))).toBe("abc");
+  });
+
+  it("grips let a swipe scroll: no touch-none, long-press needed on touch", () => {
+    render(
+      <SortableList
+        items={items}
+        label="Plans"
+        nameOf={(i) => i.name}
+        onReorder={vi.fn()}
+        render={(item, { handle }) => (
+          <div>
+            {handle}
+            {item.name}
+          </div>
+        )}
+      />,
+    );
+    const handle = screen.getByRole("button", { name: "Move A" });
+    expect(handle.className).toContain("touch-manipulation");
+    expect(handle.className).not.toContain("touch-none");
+    expect(TOUCH_DRAG_DELAY_MS).toBeGreaterThanOrEqual(200);
   });
 
   it("renders handles and reorders with the keyboard", async () => {

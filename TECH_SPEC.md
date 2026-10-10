@@ -276,14 +276,14 @@ Every write is a command in `data/commands/`. Signature: `(input) => Promise<Res
 
 Errors map to `RR-DB-002/003`.
 
-| Group              | Commands                                                                                                                                                                                       |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Day                | `tickTask`, `untickTask`, `skipTaskToday`, `toggleStep`, `pickPlan`, `pickSurvivalLevel`, `setSurvivalMode`, `closeDay`, `rolloverDay`, `dismissDayPrompt`                                     |
-| Tasks              | `createTask` (+ survival copies), `updateTask`, `patchTask`, `deleteTask`, `duplicateTask`, `copyTaskToPlan`, `moveTask` (reorder and move), `importPastedList`                                |
-| Sections           | `createSection`, `updateSection`, `duplicateSection`, `linkSectionToPlan`, `moveSectionToPlan`, `removeSectionFromPlan`, `reorderSection`, `archiveSection`, `restoreSection`, `deleteSection` |
-| Plans              | `createPlan`, `renamePlan`, `setPlanDescription`, `makePrimary`, `setSurvivalMembership`, `duplicatePlan`, `reorderPlan`, `archivePlan`, `deletePlan`, `restorePlan`                           |
-| Timer · device     | `startTimer`, `stopTimer`, `markTimerAlerted`, `writeKvCommand` (device-only: not synced, not logged)                                                                                          |
-| Settings / account | `updateSettings`, `prepareExport` (JSON, tasks CSV, log CSV), `combinePlans`, `adoptAllRows`, `clearSyncedData`, `forgetAccount`, `logAccountEvent`, `retryQuarantined`                        |
+| Group              | Commands                                                                                                                                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Day                | `tickTask`, `untickTask`, `skipTaskToday`, `unskipTaskToday`, `skipSectionToday`, `unskipSectionToday`, `toggleStep`, `pickPlan`, `pickSurvivalLevel`, `setSurvivalMode`, `closeDay`, `rolloverDay`, `dismissDayPrompt` |
+| Tasks              | `createTask` (+ survival copies), `updateTask`, `patchTask`, `deleteTask`, `duplicateTask`, `copyTaskToPlan`, `moveTask` (reorder and move), `importPastedList`                                                         |
+| Sections           | `createSection`, `updateSection`, `duplicateSection`, `linkSectionToPlan`, `moveSectionToPlan`, `removeSectionFromPlan`, `reorderSection`, `archiveSection`, `restoreSection`, `deleteSection`                          |
+| Plans              | `createPlan`, `renamePlan`, `setPlanDescription`, `makePrimary`, `setSurvivalMembership`, `duplicatePlan`, `reorderPlan`, `archivePlan`, `deletePlan`, `restorePlan`                                                    |
+| Timer · device     | `startTimer`, `stopTimer`, `markTimerAlerted`, `writeKvCommand` (device-only: not synced, not logged)                                                                                                                   |
+| Settings / account | `updateSettings`, `prepareExport` (JSON, tasks CSV, log CSV), `combinePlans`, `adoptAllRows`, `clearSyncedData`, `forgetAccount`, `logAccountEvent`, `retryQuarantined`                                                 |
 
 Ranks: `rankForPosition()` places an item between its neighbours. When two siblings share a key (e.g. after combining copies) it renumbers the siblings in the same transaction; reads tie-break equal ranks by `id`.
 

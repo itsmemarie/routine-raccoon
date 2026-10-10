@@ -4,6 +4,7 @@ import { Plus, X } from "lucide-react";
 import { useId, useState } from "react";
 import { ChoiceChip } from "@/components/ui/chip";
 import { GroupHeading } from "@/components/ui/layout";
+import { applyMove, SortableList } from "@/components/ui/sortable-list";
 import { SwitchRow } from "@/components/ui/toggle";
 import { defaultSmallerMinutes } from "@/domain/duration";
 import type { DayPlan, SurvivalLevel } from "@/domain/types";
@@ -71,7 +72,10 @@ export function MinutesField({
   );
 }
 
-/** Steps editor: one input per step, remove ×, Add subtask. Blank steps are dropped on save. */
+/**
+ * Steps editor: one input per step, drag grip to reorder, remove ×, Add subtask. Blank steps
+ * are dropped on save.
+ */
 export function StepsEditor({
   steps,
   onChange,
@@ -81,13 +85,23 @@ export function StepsEditor({
 }) {
   const headingId = useId();
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  // SortableList keys rows by `id`; a draft's stable identity is its `key`.
+  const rows = steps.map((step) => ({ id: step.key, step }));
   return (
     <section aria-labelledby={headingId} className="mt-5">
       <GroupHeading id={headingId}>Steps</GroupHeading>
       <div className="mt-2.5 rounded-[14px] border border-border bg-surface px-3.5 pt-1 pb-3">
-        <ol>
-          {steps.map((step, index) => (
-            <li key={step.key} className="flex items-center gap-[11px] border-b border-border py-1">
+        <SortableList
+          items={rows}
+          label="Steps"
+          nameOf={(row) => row.step.text || "empty step"}
+          onReorder={(key, afterKey) =>
+            onChange(applyMove(rows, key, afterKey).map((row) => row.step))
+          }
+          className="flex flex-col"
+          render={({ step }, { handle, index }) => (
+            <div className="flex items-center gap-[11px] border-b border-border py-1">
+              {handle}
               <span
                 aria-hidden
                 className="w-4 text-center text-[11.5px] font-semibold text-text-faint"
@@ -118,9 +132,9 @@ export function StepsEditor({
                   <X size={14} strokeWidth={1.8} aria-hidden />
                 </span>
               </button>
-            </li>
-          ))}
-        </ol>
+            </div>
+          )}
+        />
         <button
           type="button"
           onClick={() => {

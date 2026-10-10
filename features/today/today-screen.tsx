@@ -1,11 +1,12 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, SkipForward, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { PromptDialog } from "@/components/ui/confirm";
 import { InlineError } from "@/components/errors/inline-error";
+import type { MenuItem } from "@/components/ui/menu";
 import { ScreenRoot } from "@/components/ui/screen";
 import { defaultContext } from "@/data/commands/context";
 import { dismissDayPrompt, pickPlan, pickSurvivalLevel } from "@/data/commands/day";
@@ -16,8 +17,8 @@ import { useEffectiveDayKey } from "@/data/hooks/use-day-key";
 import { useKv } from "@/data/hooks/use-kv";
 import { useTodaySnapshot } from "@/data/hooks/use-today-snapshot";
 import { formatDayHeading } from "@/domain/time";
-import { buildPlanOptions, buildToday, type TodayTask } from "@/domain/today";
-import { isLive, type Section, type SurvivalLevel, type Task } from "@/domain/types";
+import { buildPlanOptions, buildToday, type TodaySection, type TodayTask } from "@/domain/today";
+import { isLive, type SurvivalLevel, type Task } from "@/domain/types";
 import { isAccountConfigured } from "@/lib/env";
 import type { AppError } from "@/lib/errors/app-error";
 import type { Result } from "@/lib/errors/result";
@@ -28,13 +29,17 @@ import { DayPrompt } from "./day-prompt";
 import { FilterChips } from "./filter-chips";
 import { PlanCard } from "./plan-card";
 import { PlanSheet } from "./plan-sheet";
+import { addTaskHref } from "./section-block";
 import { TodayBoard, type BoardMove } from "./today-board";
 import { TodayHeader } from "./today-header";
 import { useTodayStore } from "./today-store";
+import { useSkipWithUndo } from "./use-skip";
 import { useTickWithUndo } from "./use-tick";
+import { sectionInView, useTodayScroll } from "./use-today-scroll";
 import { WelcomeCard } from "./welcome-card";
 
 const PAGE = "P01" as const;
+const ICON = { size: 15, strokeWidth: 1.6 } as const;
 
 /**
  * Today (P01). Reads one live snapshot, derives everything with the pure `buildToday`
@@ -52,9 +57,13 @@ export function TodayScreen() {
     filter,
     collapsed,
     ticking,
+    showDone,
+    showSkipped,
     planSheetOpen,
     setFilter,
     toggleCollapsed,
+    toggleShowDone,
+    toggleShowSkipped,
     setPlanSheetOpen,
   } = useTodayStore();
   const [newPlanOpen, setNewPlanOpen] = useState(false);
@@ -83,6 +92,7 @@ export function TodayScreen() {
     if (countsRef.current.open === 0 && countsRef.current.done > 0) router.push("/day-complete/");
   }, [router]);
   const { tick, untick } = useTickWithUndo(dayKey, onUndoWindowClosed);
+  const skips = useSkipWithUndo(dayKey, onUndoWindowClosed);
 
   const tasksById = useMemo(
     () => new Map<string, Task>(snapshot?.tasks.map((t) => [t.id, t]) ?? []),
@@ -128,16 +138,74 @@ export function TodayScreen() {
     [tick, timer],
   );
 
+  // A skipped task leaves today's list, so its running timer stops, as after a tick.
+  const stopTimerFor = useCallback(
+    (taskIds: readonly string[]) => {
+      if (timer.current && taskIds.includes(timer.current.taskId)) {
+        void timer.stop({ quiet: true });
+      }
+    },
+    [timer],
+  );
+  const onSkip = useCallback(
+    async (item: TodayTask) => {
+      const skipped = await skips.skipTask(item.task);
+      if (skipped) stopTimerFor([item.task.id]);
+      return skipped;
+    },
+    [skips, stopTimerFor],
+  );
+  const onSkipSection = useCallback(
+    async (view: TodaySection) => stopTimerFor(await skips.skipSection(view.section)),
+    [skips, stopTimerFor],
+  );
+
+  useTodayScroll(Boolean(view && dayKey && snapshot && planOptions));
+
   if (!view || !dayKey || !snapshot || !planOptions) {
     return <ScreenRoot pageId={PAGE} className="pb-28" />;
   }
   const settings = snapshot.settings;
   const activePlan = view.activePlan;
+  const planId = activePlan?.id ?? null;
+
+  // "Add task" creates in today's plan and in the section on screen, not the first one.
+  const onAddTask = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+    event.preventDefault();
+    router.push(addTaskHref(planId, sectionInView()));
+  };
 
   const linkCount = (sectionId: string) =>
     snapshot.planSections.filter((l) => l.section_id === sectionId && isLive(l)).length;
-  const menuItemsFor = (section: Section) =>
-    activePlan ? sectionActions.menuItems(section, activePlan, linkCount(section.id) > 1) : [];
+  // Today's ⋯ menu leads with the day's own actions: skip the section, or bring it back.
+  const skipItemsFor = (view: TodaySection): MenuItem[] => [
+    ...(view.counts.open > 0
+      ? [
+          {
+            label: "Skip today",
+            icon: <SkipForward {...ICON} />,
+            onSelect: () => void onSkipSection(view),
+          },
+        ]
+      : []),
+    ...(view.counts.skipped > 0
+      ? [
+          {
+            label: "Bring back skipped",
+            icon: <Undo2 {...ICON} />,
+            onSelect: () => void skips.bringBackSection(view.section),
+          },
+        ]
+      : []),
+  ];
+  const menuItemsFor = (view: TodaySection) =>
+    activePlan
+      ? [
+          ...skipItemsFor(view),
+          ...sectionActions.menuItems(view.section, activePlan, linkCount(view.section.id) > 1),
+        ]
+      : [];
 
   const hasAnyTask = snapshot.tasks.some((t) => t.deleted_at === null);
   const showWelcome = !hasAnyTask && welcomeDismissed !== true && welcomeDismissed !== undefined;
@@ -157,7 +225,12 @@ export function TodayScreen() {
 
   return (
     <ScreenRoot pageId={PAGE} className="px-3.5 pb-40">
-      <TodayHeader dateLabel={formatDayHeading(dayKey)} headline={view.headline} />
+      <TodayHeader
+        dateLabel={formatDayHeading(dayKey)}
+        headline={view.headline}
+        addTaskHref={addTaskHref(planId, null)}
+        onAddTask={onAddTask}
+      />
       <PlanCard
         {...view.planCard}
         survival={view.survivalOn}
@@ -187,12 +260,20 @@ export function TodayScreen() {
 
       <TodayBoard
         sections={view.sections}
+        planId={planId}
         ticking={ticking}
         collapsed={collapsed}
+        showDone={showDone}
+        showSkipped={showSkipped}
         dragDisabled={false}
         menuItemsFor={menuItemsFor}
         onToggle={toggleCollapsed}
+        onToggleDone={toggleShowDone}
+        onToggleSkipped={toggleShowSkipped}
         onMove={onMove}
+        onSkip={onSkip}
+        onBringBack={(item) => void skips.bringBackTask(item.task)}
+        onBringBackSection={(target) => void skips.bringBackSection(target.section)}
         card={(item) => ({
           onTick: () => {
             const task = tasksById.get(item.task.id);
@@ -220,7 +301,8 @@ export function TodayScreen() {
           <Plus size={13} strokeWidth={2.4} aria-hidden /> Add section
         </Link>
         <Link
-          href="/task/edit/"
+          href={addTaskHref(planId, null)}
+          onClick={onAddTask}
           className="flex min-h-12 items-center justify-center gap-2 rounded-card bg-ink p-3.5 text-[13.5px] font-bold text-white"
         >
           <Plus size={13} strokeWidth={2.4} aria-hidden /> Add task

@@ -220,8 +220,41 @@ selected non-survival plan returns to primary.
 3. After 700ms, animate the row out.
 4. When no visible unticked tasks remain, go to **Day complete** once the undo window closes.
    Un-ticking from Task detail (Done ↔ Un-tick) works at any time.
+5. Every tick offers the 5s Undo: on a card, in Task detail, and from the timer bar's "Tick it".
+   A message that arrives while Undo is showing (a sync error, "Saved") waits until the undo
+   window closes instead of replacing it.
+6. Ticked tasks wait under a **"✓ {n} done"** row at the end of their section (collapsed, per
+   session). Opening it lists them greyed and struck through; tapping the tick box un-ticks the
+   task, which returns to its place and writes `uncompleted`. _(Owner feedback, Oct 2026.)_
 
 Ticking every subtask does **not** complete the parent.
+
+### Skip today
+
+_(Owner request, Oct 2026.)_
+
+1. **Swipe a card left** (touch or pen) to skip the task for today. The card follows the finger
+   and uncovers a "⏭ Skip today" panel, which turns dark (with a short vibration) once the card
+   has travelled 120px or 40% of its width, whichever is less. Letting go there, or a quick flick
+   of at least 48px, slides the card out. A shorter swipe springs back. A mostly vertical swipe
+   scrolls the page; a swipe that starts on the grip never skips; a swipe never opens the task.
+   The mouse doesn't swipe: Task detail ⋯ → **Skip today** stays the button for it.
+2. Snackbar for **5s**: `"Skipped {task} for today"` + **Undo**. Writes `skipped`
+   (`"Skipped {task}"` / `"{section} · today only"`); Undo writes `edited` `"Brought back {task}"`.
+3. **Skip a section:** on Today, the section ⋯ menu starts with **Skip today** (when it has open
+   tasks). Every open task in it is skipped; ticked ones stay ticked. One `skipped` entry
+   (`"Skipped {section}"` / `"{n} tasks · today only"`) and the snackbar
+   `"Skipped {section} for today"` + **Undo**, which brings back exactly those tasks.
+4. A section whose every task today was skipped shows **Skipped** in its header instead of the
+   total, and a dashed box `"Skipped for today"` with **Bring back**.
+5. Skipped tasks wait under a **"⏭ {n} skipped"** row after "✓ {n} done" (collapsed, per
+   session). Opening it lists them faint, each with **Bring back**. The section menu's **Bring
+   back skipped** restores them all (`edited` `"Brought back {section}"` / `"{n} tasks · today"`).
+6. Skipped tasks leave the totals, the headline and Day complete's counts. A running timer for a
+   skipped task stops. When nothing is left once the undo window closes, go to **Day complete**,
+   as after a tick.
+7. Skips last for the day only: after the reset the tasks are back. They feed "Skipped N days
+   running" (Task detail) and "Avoiding this" (Progress).
 
 ### Paste a list (inline)
 
@@ -290,14 +323,21 @@ Survival).
   `edited` "Moved {task}" / `"{from} → {to}, by drag"`. Within-section reorder updates
   `tasks.rank`. The prototype only moves between sections; build reorder too.
 - **Sections** (Sections manager) and **Day Plans** (Settings): drag to reorder, plus ↑/↓ buttons.
+- **Steps** (Task detail and New/Edit task): drag by the grip to reorder.
+- **On touch, a drag starts with a long press on the grip** (about ¼ s, with a short vibration);
+  a swipe that starts on a grip scrolls the page. A mouse drags at once; the keyboard uses Space,
+  arrows, Space. _(Owner feedback, Oct 2026: left-thumb scrolling kept reordering tasks.)_
 
 ### Sections
 
 - Header row: chevron (collapse, per session) · colour dot · name · clock + start time · total
   (in the section colour) · **⋯ menu**.
 - **⋯ menu:** Edit section · Duplicate · Copy to Day Plan · Move to Day Plan · Archive · Delete.
-  Delete asks to confirm and removes the tasks. Archive keeps history.
-- "+ Add task" row at the end of every expanded section opens New task preset to that section.
+  Delete asks to confirm and removes the tasks. Archive keeps history. On Today the menu starts
+  with **Skip today** / **Bring back skipped** (see "Skip today").
+- "+ Add task" row at the end of every expanded section opens New task preset to that section
+  **and to the Day Plan Today shows** (not the section's home plan). The header and bottom
+  "Add task" buttons preset today's plan and the section on screen.
 - Empty section: dashed drop box, `"Empty — drag a task in"`, or in Survival
   `"Nothing here on a {level} day"`.
 - "+ New section" (dashed) at the bottom of Today, in the task form's section chips, and in the
@@ -335,7 +375,8 @@ Read-only. Filters: All · Completed · Added · Edited · Survival Mode. Groupe
 | Survival Mode | `survival` |
 | (All only) | `closed` |
 
-Events that write entries: tick/untick, add/edit/delete/duplicate/copy/move task, skip today, paste
+Events that write entries: tick/untick, add/edit/delete/duplicate/copy/move task, skip today and
+bring back (a task or a whole section), paste
 import, section add/edit/duplicate/copy/move/archive/delete, plan rename/primary/survival
 membership/archive/delete/restore, plan pick, reset time change, close the day, account
 created/signed in/deleted.
@@ -388,8 +429,8 @@ Every screen is reachable from the prototype's screen map. Screenshots are in `s
 | 2 | Today's plan sheet | `03` | Plan picker, see logic above |
 | 3 | Today in Survival | `04` | Tinted plan card, shrunk tasks, empty-section copy. The screenshot shows the prototype's filter model; the spec shows the survival plan's own sections |
 | 4 | Extra Support active | `05` | Filter applied |
-| 5 | Section ⋯ menu | `06` | |
-| 6 | **Task detail** | `07`, `08` | Read mode hides empty fields. Header: back, **Edit**, ⋯. Emoji + name, tags (Hard, minutes, section, plan, location), Notes (mantra card, notes, embedded video that plays in-app), Steps (tickable, "1 of 3 done", Add subtask), info rows (Frequency, Reminder, Section, Also in, Skipped N days running), footer **Start {n} min** / **Done** |
+| 5 | Section ⋯ menu | `06` | On Today it starts with Skip today / Bring back skipped (not in the screenshot) |
+| 6 | **Task detail** | `07`, `08` | Read mode hides empty fields, except Notes ("Add a note") and Steps (Add subtask), which are always one tap from adding. Header: back, **Edit**, ⋯. Emoji + name, tags (Hard, minutes, section, plan, location), Notes (mantra card, notes, embedded video that plays in-app), Steps (tickable, "1 of 3 done", reorder by grip, Add subtask: Enter adds and stays open for the next), info rows (Frequency, Reminder, Section, Also in, Skipped N days running), footer **Start {n} min** / **Done** |
 | 7 | Task ⋯ menu | `09` | Edit task · Duplicate · Copy to Day Plan or section · Copy link to task · View activity · Skip today · Delete task |
 | 8 | Copy / move sheet | `19` | |
 | 9 | Delete confirm | `20` | "Delete “{name}”? The task and its steps are removed for good. You can skip it for today instead." |

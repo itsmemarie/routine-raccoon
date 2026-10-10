@@ -36,6 +36,24 @@ export function skippedCopy(task: { name: string }, sectionName: string): LogCop
   return { kind: "skipped", title: `Skipped ${task.name}`, meta: join(sectionName, "today only") };
 }
 
+/** Undo of a skip, or Bring back: the task is on today's list again. */
+export function unskippedCopy(task: { name: string }, sectionName: string): LogCopy {
+  return { kind: "edited", title: `Brought back ${task.name}`, meta: join(sectionName, "today") };
+}
+
+function tasksCount(n: number): string {
+  return `${n} ${n === 1 ? "task" : "tasks"}`;
+}
+
+/** Skip a whole section: one entry for its open tasks, meta `"{n} tasks · today only"`. */
+export function sectionSkippedCopy(name: string, count: number): LogCopy {
+  return { kind: "skipped", title: `Skipped ${name}`, meta: join(tasksCount(count), "today only") };
+}
+
+export function sectionUnskippedCopy(name: string, count: number): LogCopy {
+  return { kind: "edited", title: `Brought back ${name}`, meta: join(tasksCount(count), "today") };
+}
+
 /** Drag between sections: title "Moved {task}", meta "{from} → {to}, by drag". */
 export function movedCopy(task: { name: string }, from: string, to: string): LogCopy {
   return { kind: "edited", title: `Moved ${task.name}`, meta: `${from} → ${to}, by drag` };

@@ -7,12 +7,15 @@ import {
   closedCopy,
   completedCopy,
   planPickedCopy,
+  sectionSkippedCopy,
+  sectionUnskippedCopy,
   skippedCopy,
   uncompletedCopy,
+  unskippedCopy,
 } from "@/domain/log";
 import { primaryPlan, survivalPlanFor } from "@/domain/survival";
 import { daysBetween } from "@/domain/time";
-import { summariseDay } from "@/domain/today";
+import { sectionTaskIds, summariseDay } from "@/domain/today";
 import type { DayKey, SurvivalLevel } from "@/domain/types";
 import { AppError } from "@/lib/errors/app-error";
 import type { Result } from "@/lib/errors/result";
@@ -22,6 +25,7 @@ import {
   findOccurrence,
   nowIso,
   readSettings,
+  requireSection,
   requireTask,
   sectionNameOf,
   writeOccurrence,
@@ -79,6 +83,8 @@ export function untickTask(
   });
 }
 
+const SKIPPED = { status: "skipped", completed_at: null, minutes_credited: null } as const;
+
 /** Skip today: hidden from Today until the next day; feeds "Skipped N days running". */
 export function skipTaskToday(
   ctx: CommandContext,
@@ -86,16 +92,85 @@ export function skipTaskToday(
 ): Promise<Result<void, AppError>> {
   return runCommand(ctx, "skipTaskToday", async () => {
     const task = await requireTask(ctx, input.taskId);
-    await writeOccurrence(ctx, task.id, input.dayKey, {
-      status: "skipped",
-      completed_at: null,
-      minutes_credited: null,
-    });
+    await writeOccurrence(ctx, task.id, input.dayKey, SKIPPED);
     await appendLog(ctx, skippedCopy(task, await sectionNameOf(ctx, task.section_id)), {
       dayKey: input.dayKey,
       taskId: task.id,
       sectionId: task.section_id,
     });
+  });
+}
+
+/** Turns a skipped occurrence back to pending; false when the task wasn't skipped that day. */
+async function unskip(ctx: CommandContext, taskId: string, dayKey: DayKey): Promise<boolean> {
+  if ((await findOccurrence(ctx, taskId, dayKey))?.status !== "skipped") return false;
+  await writeOccurrence(ctx, taskId, dayKey, { status: "pending" });
+  return true;
+}
+
+/** Undo of a skip, or Bring back: the task is on today's list again. Steps ticked are kept. */
+export function unskipTaskToday(
+  ctx: CommandContext,
+  input: { taskId: string; dayKey: DayKey },
+): Promise<Result<void, AppError>> {
+  return runCommand(ctx, "unskipTaskToday", async () => {
+    const task = await requireTask(ctx, input.taskId);
+    if (!(await unskip(ctx, task.id, input.dayKey))) return;
+    await appendLog(ctx, unskippedCopy(task, await sectionNameOf(ctx, task.section_id)), {
+      dayKey: input.dayKey,
+      taskId: task.id,
+      sectionId: task.section_id,
+    });
+  });
+}
+
+/**
+ * Skip a whole section today: every task of it still open on today's list is skipped (ticked
+ * ones stay ticked), with one log entry. Returns the skipped ids so Undo brings back exactly
+ * these.
+ */
+export function skipSectionToday(
+  ctx: CommandContext,
+  input: { sectionId: string; dayKey: DayKey },
+): Promise<Result<{ taskIds: string[] }, AppError>> {
+  return runCommand(ctx, "skipSectionToday", async () => {
+    const section = await requireSection(ctx, input.sectionId);
+    const day = await readDayInput(ctx.db, input.dayKey);
+    const taskIds = sectionTaskIds(day, section.id, "open");
+    if (taskIds.length === 0) return { taskIds };
+    for (const taskId of taskIds) await writeOccurrence(ctx, taskId, input.dayKey, SKIPPED);
+    await appendLog(ctx, sectionSkippedCopy(section.name, taskIds.length), {
+      dayKey: input.dayKey,
+      sectionId: section.id,
+    });
+    return { taskIds };
+  });
+}
+
+/**
+ * Brings a section's skipped tasks back onto today's list: `taskIds` (Undo of a section skip),
+ * or every task of the section skipped today. One log entry; returns how many came back.
+ */
+export function unskipSectionToday(
+  ctx: CommandContext,
+  input: { sectionId: string; dayKey: DayKey; taskIds?: readonly string[] },
+): Promise<Result<{ count: number }, AppError>> {
+  return runCommand(ctx, "unskipSectionToday", async () => {
+    const section = await requireSection(ctx, input.sectionId);
+    const targets =
+      input.taskIds ??
+      sectionTaskIds(await readDayInput(ctx.db, input.dayKey), section.id, "skipped");
+    let count = 0;
+    for (const taskId of targets) {
+      if (await unskip(ctx, taskId, input.dayKey)) count++;
+    }
+    if (count > 0) {
+      await appendLog(ctx, sectionUnskippedCopy(section.name, count), {
+        dayKey: input.dayKey,
+        sectionId: section.id,
+      });
+    }
+    return { count };
   });
 }
 

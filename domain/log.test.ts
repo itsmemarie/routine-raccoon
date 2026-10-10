@@ -22,6 +22,9 @@ import {
   sectionMovedCopy,
   sectionRemovedFromPlanCopy,
   sectionRestoredCopy,
+  sectionSkippedCopy,
+  sectionUnskippedCopy,
+  skippedCopy,
   survivalRenamedCopy,
   taskAddedCopy,
   taskCopiedCopy,
@@ -29,6 +32,7 @@ import {
   taskDeletedCopy,
   taskDuplicatedCopy,
   taskEditedCopy,
+  unskippedCopy,
 } from "./log";
 
 describe("log copy (handoff wording)", () => {
@@ -52,6 +56,30 @@ describe("log copy (handoff wording)", () => {
       "To Travelling · Before leaving",
     );
     expect(movedViaSheetCopy({ name: "Eat" }, "Morning", "Evening").meta).toBe("Morning → Evening");
+  });
+
+  it("skips and bringing back", () => {
+    expect(skippedCopy({ name: "Eat" }, "Morning")).toEqual({
+      kind: "skipped",
+      title: "Skipped Eat",
+      meta: "Morning · today only",
+    });
+    expect(unskippedCopy({ name: "Eat" }, "Morning")).toEqual({
+      kind: "edited",
+      title: "Brought back Eat",
+      meta: "Morning · today",
+    });
+    expect(sectionSkippedCopy("Morning", 3)).toEqual({
+      kind: "skipped",
+      title: "Skipped Morning",
+      meta: "3 tasks · today only",
+    });
+    expect(sectionSkippedCopy("Morning", 1).meta).toBe("1 task · today only");
+    expect(sectionUnskippedCopy("Morning", 2)).toEqual({
+      kind: "edited",
+      title: "Brought back Morning",
+      meta: "2 tasks · today",
+    });
   });
 
   it("describes the most telling task change", () => {

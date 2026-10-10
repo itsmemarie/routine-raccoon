@@ -110,10 +110,14 @@ export function AuthScreen() {
 
   const goAccount = useCallback(() => router.replace("/account/"), [router]);
   const linking = useLinkAccount(PAGE, goAccount);
+  // Signing in only ends once this phone is linked (the first sync can take a few seconds):
+  // callers stay busy until `finish` settles, so the form can't be submitted a second time.
   const finish = useCallback(
-    (user: AccountUser, event: "created" | "signed-in") => void linking.link(user, event),
+    (user: AccountUser, event: "created" | "signed-in") => linking.link(user, event),
     [linking],
   );
+  const working = busy !== null || linking.busy;
+  const returningFromGoogle = params.has("code");
 
   // Resend lock countdown (handoff: 30 s).
   useEffect(() => {
@@ -142,10 +146,10 @@ export function AuthScreen() {
       // Opened while already signed in: the Account screen is where that lives.
       router.replace("/account/");
     } else if (oauthCode) {
-      void exchangeOAuthCode(oauthCode).then((result) => {
-        setBusy(null);
-        if (result.ok) finish(result.value, "signed-in");
+      void exchangeOAuthCode(oauthCode).then(async (result) => {
+        if (result.ok) await finish(result.value, "signed-in");
         else setError(result.error);
+        setBusy(null);
       });
     } else if (reset && isValidEmail(reset)) {
       void sendResetCode(reset).then((result) => {
@@ -200,7 +204,7 @@ export function AuthScreen() {
   };
 
   const google = async () => {
-    if (busy) return;
+    if (working) return;
     setError(null);
     setBusy("google");
     const result = await signInWithGoogle();
@@ -219,7 +223,7 @@ export function AuthScreen() {
   };
 
   const submit = async () => {
-    if (busy) return;
+    if (working) return;
     setError(null);
     if (!isValidEmail(email)) return setError(new AppError("RR-AUTH-011"));
     if (status === "google") return void google();
@@ -227,19 +231,23 @@ export function AuthScreen() {
       if (!isStrongPassword(password)) return setError(new AppError("RR-AUTH-009"));
       setBusy("email");
       const result = await signUp(email, password, name);
+      if (result.ok && result.value.kind === "signed-in")
+        await finish(result.value.user, "created");
       setBusy(null);
       if (!result.ok) return setError(result.error);
-      if (result.value.kind === "signed-in") return finish(result.value.user, "created");
-      return startCode("signup");
+      if (result.value.kind === "code-sent") startCode("signup");
+      return;
     }
     if (status === "checking" || status === "idle") return;
     if (!password) return setError(new AppError("RR-AUTH-001"));
     setBusy("email");
     const result = await signInWithPassword(email, password);
+    if (result.ok && result.value.kind === "signed-in")
+      await finish(result.value.user, "signed-in");
     setBusy(null);
     if (result.ok) {
-      if (result.value.kind === "needs-code") return startCode("signup");
-      return finish(result.value.user, "signed-in");
+      if (result.value.kind === "needs-code") startCode("signup");
+      return;
     }
     if (result.error.code === "RR-AUTH-001") {
       const next = tries + 1;
@@ -252,15 +260,16 @@ export function AuthScreen() {
   };
 
   const confirmCode = async (value: string) => {
-    if (busy || value.length < 6) return;
+    if (working || value.length < 6) return;
     setBusy("code");
     const result = await verifyCode(email, value, purpose);
+    if (result.ok && purpose === "signup") await finish(result.value, "created");
     setBusy(null);
     if (!result.ok) {
       setCode("");
       return setError(result.error);
     }
-    if (purpose === "signup") return finish(result.value, "created");
+    if (purpose === "signup") return;
     setPasswordValue("");
     setShow(false);
     setError(null);
@@ -271,11 +280,11 @@ export function AuthScreen() {
     if (!isStrongPassword(password)) return setError(new AppError("RR-AUTH-009"));
     setBusy("pass");
     const result = await setPassword(password);
+    const signedIn = session.status === "signed-in" ? session.user : null;
+    if (result.ok && signedIn) await finish(signedIn, "signed-in");
     setBusy(null);
     if (!result.ok) return setError(result.error);
-    const signedIn = session.status === "signed-in" ? session.user : null;
-    if (signedIn) finish(signedIn, "signed-in");
-    else goAccount();
+    if (!signedIn) goAccount();
   };
 
   const back = () => {
@@ -358,6 +367,32 @@ export function AuthScreen() {
     </ul>
   );
 
+  // Back from Google: nothing to tap until the phone is linked (or it fails and the form returns).
+  if (returningFromGoogle && working && !error) {
+    return (
+      <ScreenRoot
+        pageId={PAGE}
+        className="flex min-h-dvh flex-col items-center justify-center px-8"
+      >
+        <div role="status" aria-live="polite" className="flex flex-col items-center text-center">
+          <Image
+            src="/icons/routine-raccoon-logo.png"
+            alt=""
+            width={58}
+            height={58}
+            className="animate-pulse rounded-card shadow-primary"
+            priority
+          />
+          <p className="mt-5 font-display text-[22px] font-bold tracking-[-0.02em] text-ink">
+            Signing you in…
+          </p>
+          <p className="mt-1.5 text-[13px] text-text-muted">Bringing back your day</p>
+        </div>
+        {linking.sheet}
+      </ScreenRoot>
+    );
+  }
+
   return (
     <ScreenRoot pageId={PAGE} className="pb-8">
       <div className="px-4 pt-[max(10px,env(safe-area-inset-top))]">
@@ -391,7 +426,7 @@ export function AuthScreen() {
             <button
               type="button"
               onClick={() => void google()}
-              disabled={busy !== null}
+              disabled={working}
               className="mt-[22px] flex min-h-[52px] w-full items-center justify-center gap-2.5 rounded-[15px] border border-border-strong bg-surface text-[14px] font-bold text-ink disabled:opacity-60"
             >
               <span aria-hidden className="font-display text-[17px] font-bold text-section-blue">
@@ -494,10 +529,10 @@ export function AuthScreen() {
               {status !== "google" ? (
                 <button
                   type="submit"
-                  disabled={busy !== null || status === "checking"}
+                  disabled={working || status === "checking"}
                   className={`${primary} mt-1`}
                 >
-                  {busy === "email"
+                  {busy === "email" || linking.busy
                     ? status === "new"
                       ? "Sending code…"
                       : "Signing in…"
@@ -559,7 +594,7 @@ export function AuthScreen() {
             <CodeInput
               value={code}
               invalid={error !== null}
-              disabled={busy === "code"}
+              disabled={working}
               onChange={(next) => {
                 setCode(next);
                 setError(null);
@@ -570,7 +605,7 @@ export function AuthScreen() {
               {error ? <ErrorBox error={error} /> : null}
               <button
                 type="button"
-                disabled={busy !== null}
+                disabled={working}
                 onClick={() => void confirmCode(code)}
                 className={primary}
               >
@@ -635,7 +670,7 @@ export function AuthScreen() {
               {error ? <ErrorBox error={error} /> : null}
               <button
                 type="button"
-                disabled={busy !== null}
+                disabled={working}
                 onClick={() => void saveNewPassword()}
                 className={`${primary} mt-1`}
               >

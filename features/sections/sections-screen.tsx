@@ -93,8 +93,8 @@ function Sections({ planId }: { planId: string }) {
           ) : null}
         </div>
         <p className="mt-[11px] text-[11.5px] leading-normal text-text-muted">
-          Drag a section to reorder it. Tap one for its actions. Each section keeps its own start
-          time and recurrence.
+          Press and hold the grip to drag a section, or use the arrows. Tap one for its actions.
+          Each section keeps its own start time and recurrence.
         </p>
 
         <div className="mt-3.5">

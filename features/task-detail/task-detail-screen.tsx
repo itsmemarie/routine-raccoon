@@ -25,6 +25,7 @@ import { GroupHeading } from "@/components/ui/layout";
 import { MenuButton } from "@/components/ui/menu";
 import { useBack } from "@/components/ui/navigation";
 import { ScreenRoot } from "@/components/ui/screen";
+import { applyMove } from "@/components/ui/sortable-list";
 import { useToastStore } from "@/components/ui/toast-store";
 import { defaultContext } from "@/data/commands/context";
 import { skipTaskToday, tickTask, toggleStep, untickTask } from "@/data/commands/day";
@@ -76,8 +77,10 @@ function InfoRow({
 }
 
 /**
- * Task detail (P02, handoff screens 6–9). Read mode hides empty fields; every visible field
- * edits in place. Steps tick for today only.
+ * Task detail (P02, handoff screens 6–9). Read mode hides empty fields except Notes and Steps,
+ * which are always one tap from adding; every visible field edits in place. Steps tick for
+ * today only and reorder by drag. Leaving (Done, Skip, Delete) goes back through history, so
+ * Today keeps its scroll position.
  */
 export function TaskDetailScreen() {
   const params = useSearchParams();
@@ -114,7 +117,6 @@ function TaskDetail({ taskId }: { taskId: string }) {
   const stepsShown = shrunk && smallerSteps.length > 0 ? smallerSteps : task.steps;
   const greyFrom = shrunk && smallerSteps.length === 0 ? 2 : Number.POSITIVE_INFINITY;
   const running = timer.current?.taskId === task.id;
-  const hasNotes = Boolean(task.mantra || task.notes || task.video_url);
 
   const patch = (fields: Parameters<typeof patchTask>[1]["patch"]) =>
     void run(patchTask(ctx, { taskId: task.id, patch: fields }));
@@ -137,7 +139,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
         onPress: () => void run(untickTask(defaultContext(), { taskId: task.id, dayKey })),
       },
     });
-    router.push("/");
+    back();
   };
 
   const infoRows = [
@@ -235,7 +237,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
                 void run(skipTaskToday(ctx, { taskId: task.id, dayKey }), {
                   success: `Skipped ${task.name} for today`,
                 }).then((r) => {
-                  if (r.ok) router.push("/");
+                  if (r.ok) back();
                 }),
             },
             {
@@ -321,40 +323,38 @@ function TaskDetail({ taskId }: { taskId: string }) {
           </section>
         ) : null}
 
-        {hasNotes ? (
-          <section aria-labelledby="notes-heading" className="mt-5">
-            <GroupHeading id="notes-heading">Notes</GroupHeading>
-            <div className="mt-[9px] rounded-[14px] border border-l-[3px] border-border border-l-primary bg-surface px-[15px] py-[13px]">
-              {task.mantra ? (
-                <InlineText
-                  value={task.mantra}
-                  label="Mantra"
-                  maxLength={300}
-                  onCommit={(mantra) => patch({ mantra })}
-                  className="text-[13px] leading-normal font-bold text-primary"
-                />
-              ) : null}
-              {task.notes ? (
-                <InlineText
-                  value={task.notes}
-                  label="Notes"
-                  multiline
-                  rows={Math.min(8, Math.max(2, task.notes.split("\n").length))}
-                  maxLength={4000}
-                  onCommit={(notes) => patch({ notes })}
-                  className={`text-[13.5px] leading-[1.55] text-ink-muted ${task.mantra ? "mt-[7px]" : ""}`}
-                />
-              ) : null}
-              {task.video_url ? (
-                <div className="mt-2">
-                  <SectionBoundary pageId={PAGE} fallback="RR-MED-001">
-                    <VideoEmbed url={task.video_url} pageId={PAGE} />
-                  </SectionBoundary>
-                </div>
-              ) : null}
-            </div>
-          </section>
-        ) : null}
+        <section aria-labelledby="notes-heading" className="mt-5">
+          <GroupHeading id="notes-heading">Notes</GroupHeading>
+          <div className="mt-[9px] rounded-[14px] border border-l-[3px] border-border border-l-primary bg-surface px-[15px] py-[13px]">
+            {task.mantra ? (
+              <InlineText
+                value={task.mantra}
+                label="Mantra"
+                maxLength={300}
+                onCommit={(mantra) => patch({ mantra })}
+                className="text-[13px] leading-normal font-bold text-primary"
+              />
+            ) : null}
+            {/* Always here, even when empty: one tap to start typing a note. */}
+            <InlineText
+              value={task.notes}
+              label="Notes"
+              placeholder="Add a note"
+              multiline
+              rows={Math.min(8, Math.max(2, task.notes.split("\n").length))}
+              maxLength={4000}
+              onCommit={(notes) => patch({ notes })}
+              className={`text-[13.5px] leading-[1.55] text-ink-muted ${task.mantra ? "mt-[7px]" : ""}`}
+            />
+            {task.video_url ? (
+              <div className="mt-2">
+                <SectionBoundary pageId={PAGE} fallback="RR-MED-001">
+                  <VideoEmbed url={task.video_url} pageId={PAGE} />
+                </SectionBoundary>
+              </div>
+            ) : null}
+          </div>
+        </section>
 
         <StepsCard
           steps={stepsShown}
@@ -377,6 +377,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
             })
           }
           onAdd={(text) => patch({ steps: [...task.steps, { text }] })}
+          onReorder={(stepId, afterId) => patch({ steps: applyMove(task.steps, stepId, afterId) })}
         />
 
         <div className="mt-4 overflow-hidden rounded-card border border-border bg-surface">
@@ -432,7 +433,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
             void run(deleteTask(ctx, { taskId: task.id }), {
               success: `Deleted ${task.name}`,
             }).then((r) => {
-              if (r.ok) router.replace("/");
+              if (r.ok) back();
               else setLeaving(false);
             });
           }}

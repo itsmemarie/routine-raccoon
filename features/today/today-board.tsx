@@ -4,12 +4,8 @@ import {
   closestCenter,
   DndContext,
   DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
   pointerWithin,
   rectIntersection,
-  useSensor,
-  useSensors,
   type Announcements,
   type CollisionDetection,
   type DragEndEvent,
@@ -17,13 +13,15 @@ import {
   type DragStartEvent,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { arrayMove } from "@dnd-kit/sortable";
 import { useMemo, useState } from "react";
+import { useDragSensors } from "@/components/ui/drag-sensors";
 import type { MenuItem } from "@/components/ui/menu";
 import type { TodaySection, TodayTask } from "@/domain/today";
-import type { Section, Step } from "@/domain/types";
+import type { Step } from "@/domain/types";
+import { pickupFeedback } from "@/lib/platform/haptics";
 import { SectionBlock } from "./section-block";
-import { SortableTaskCard, TaskCardView } from "./task-card";
+import { SkippedTaskRow, SortableTaskCard, TaskCardView } from "./task-card";
 
 export interface BoardMove {
   readonly taskId: string;
@@ -53,24 +51,46 @@ const collision: CollisionDetection = (args) => {
  * Today's sections with drag and drop (handoff "Drag and drop", PRD R2): reorder within a
  * section and move between sections, onto cards, headers, collapsed or empty sections. Moves
  * are committed through `onMove` (one command); the live query then re-renders the result.
+ * Ticked tasks leave the list and wait behind each section's "N done" row, where they can be
+ * un-ticked. Swiping a card left skips it for today; skipped tasks wait behind "N skipped".
  */
 export function TodayBoard({
   sections,
+  planId,
   ticking,
   collapsed,
+  showDone,
+  showSkipped,
   dragDisabled,
   menuItemsFor,
   onToggle,
+  onToggleDone,
+  onToggleSkipped,
   onMove,
+  onSkip,
+  onBringBack,
+  onBringBackSection,
   card,
 }: {
   sections: readonly TodaySection[];
+  /** The plan Today shows: "+ Add task" in a section creates the task there. */
+  planId: string | null;
   ticking: Readonly<Record<string, true>>;
   collapsed: Readonly<Record<string, true>>;
+  /** Sections whose ticked tasks are shown (session only). */
+  showDone: Readonly<Record<string, true>>;
+  /** Sections whose skipped tasks are shown (session only). */
+  showSkipped: Readonly<Record<string, true>>;
   dragDisabled: boolean;
-  menuItemsFor: (section: Section) => readonly MenuItem[];
+  menuItemsFor: (view: TodaySection) => readonly MenuItem[];
   onToggle: (sectionId: string) => void;
+  onToggleDone: (sectionId: string) => void;
+  onToggleSkipped: (sectionId: string) => void;
   onMove: (move: BoardMove) => void;
+  /** Swipe left on a card; resolves false when the skip failed. */
+  onSkip: (item: TodayTask) => Promise<boolean>;
+  onBringBack: (item: TodayTask) => void;
+  onBringBackSection: (view: TodaySection) => void;
   card: (item: TodayTask) => {
     onTick: () => void;
     onUntick: () => void;
@@ -79,10 +99,7 @@ export function TodayBoard({
     steps: readonly Step[] | null;
   };
 }) {
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useDragSensors();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overSectionId, setOverSectionId] = useState<string | null>(null);
 
@@ -144,7 +161,10 @@ export function TodayBoard({
     setOverSectionId(null);
   };
 
-  const onDragStart = ({ active }: DragStartEvent) => setActiveId(String(active.id));
+  const onDragStart = ({ active }: DragStartEvent) => {
+    pickupFeedback();
+    setActiveId(String(active.id));
+  };
   const onDragOver = ({ over }: DragOverEvent) => setOverSectionId(targetSection(over?.id));
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -200,6 +220,7 @@ export function TodayBoard({
       <div className="mt-1 flex flex-col">
         {sections.map((view) => {
           const rows = rowsBySection.get(view.section.id) ?? [];
+          const doneRows = view.tasks.filter((t) => t.done && !ticking[t.task.id]);
           const emptyText =
             view.emptyText ??
             (view.tasks.length > 0 && view.tasks.every((t) => t.done)
@@ -209,18 +230,44 @@ export function TodayBoard({
             <SectionBlock
               key={view.section.id}
               view={view}
+              planId={planId}
               rows={rows}
+              doneRows={doneRows}
               emptyText={emptyText}
               collapsed={Boolean(collapsed[view.section.id])}
+              showDone={Boolean(showDone[view.section.id])}
+              showSkipped={Boolean(showSkipped[view.section.id])}
               isDropTarget={activeId !== null && overSectionId === view.section.id}
-              menuItems={menuItemsFor(view.section)}
+              menuItems={menuItemsFor(view)}
               onToggle={() => onToggle(view.section.id)}
+              onToggleDone={() => onToggleDone(view.section.id)}
+              onToggleSkipped={() => onToggleSkipped(view.section.id)}
+              onBringBack={() => onBringBackSection(view)}
+              renderSkippedRow={(item) => (
+                <SkippedTaskRow
+                  key={item.task.id}
+                  item={item}
+                  onBringBack={() => onBringBack(item)}
+                />
+              )}
+              renderDoneCard={(item) => (
+                <li key={item.task.id} className="list-none">
+                  <TaskCardView
+                    item={item}
+                    ticking={false}
+                    // Ticked cards don't drag: a spacer keeps them aligned with the open ones.
+                    handle={<span aria-hidden className="w-6 shrink-0" />}
+                    {...card(item)}
+                  />
+                </li>
+              )}
               renderCard={(item) => (
                 <SortableTaskCard
                   key={item.task.id}
                   item={item}
                   ticking={Boolean(ticking[item.task.id])}
                   disabled={dragDisabled || item.done}
+                  onSkip={() => onSkip(item)}
                   {...card(item)}
                 />
               )}

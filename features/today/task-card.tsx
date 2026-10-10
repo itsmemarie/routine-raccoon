@@ -2,9 +2,11 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, Play } from "lucide-react";
+import { Check, Play, SkipForward, Undo2 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { GRIP_TOUCH_CLASS } from "@/components/ui/drag-sensors";
+import { SwipeAction } from "@/components/ui/swipe-action";
 import type { TodayTask } from "@/domain/today";
 import type { Step } from "@/domain/types";
 import { RunningTimerPill } from "@/features/timer";
@@ -20,6 +22,10 @@ export interface TaskCardProps {
   readonly timerRunning: boolean;
   /** Extra Support: the steps still to do, shown on the card. */
   readonly steps: readonly Step[] | null;
+}
+
+function taskHref(taskId: string): string {
+  return `/task/?id=${encodeURIComponent(taskId)}`;
 }
 
 function Grip({ active }: { active: boolean }) {
@@ -51,7 +57,7 @@ export function TaskCardView({
   state = "idle",
 }: TaskCardProps & { handle?: ReactNode; state?: "idle" | "placeholder" | "overlay" }) {
   const { task, done } = item;
-  const href = `/task/?id=${encodeURIComponent(task.id)}`;
+  const href = taskHref(task.id);
   const overlay = state === "overlay";
   return (
     <div
@@ -140,8 +146,18 @@ export function TaskCardView({
   );
 }
 
-/** Sortable card on Today: the grip is the only drag handle (touch + keyboard). */
-export function SortableTaskCard(props: TaskCardProps & { disabled: boolean }) {
+/**
+ * Sortable card on Today: the grip is the only drag handle (long-press on touch, mouse,
+ * keyboard). Swiping the card left skips the task for today; a swipe never starts on the grip.
+ */
+export function SortableTaskCard({
+  onSkip,
+  ...props
+}: TaskCardProps & {
+  disabled: boolean;
+  /** Swipe left: skip for today. Resolves false when the skip failed (the card comes back). */
+  onSkip: () => Promise<boolean>;
+}) {
   const { task } = props.item;
   const {
     attributes,
@@ -158,8 +174,9 @@ export function SortableTaskCard(props: TaskCardProps & { disabled: boolean }) {
       ref={setActivatorNodeRef}
       {...attributes}
       {...listeners}
+      data-swipe-ignore=""
       aria-label={`Move ${task.name}`}
-      className="-my-3 -ml-2 flex min-h-11 w-8 shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing"
+      className={`-my-3 -ml-2 flex min-h-11 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing ${GRIP_TOUCH_CLASS}`}
     >
       <Grip active={isDragging} />
     </button>
@@ -170,7 +187,53 @@ export function SortableTaskCard(props: TaskCardProps & { disabled: boolean }) {
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className="list-none"
     >
-      <TaskCardView {...props} handle={handle} state={isDragging ? "placeholder" : "idle"} />
+      <SwipeAction
+        label="Skip today"
+        icon={<SkipForward size={15} strokeWidth={1.8} aria-hidden />}
+        disabled={props.item.done || props.ticking || isDragging}
+        onCommit={onSkip}
+      >
+        <TaskCardView {...props} handle={handle} state={isDragging ? "placeholder" : "idle"} />
+      </SwipeAction>
+    </li>
+  );
+}
+
+/**
+ * A task skipped today, listed under its section's "N skipped" row: faint, with Bring back.
+ * @see docs/handoff/README.md "Skip today"
+ */
+export function SkippedTaskRow({
+  item,
+  onBringBack,
+}: {
+  readonly item: TodayTask;
+  readonly onBringBack: () => void;
+}) {
+  const { task } = item;
+  return (
+    <li
+      data-testid="skipped-task"
+      className="flex list-none items-center gap-[11px] rounded-card border border-border bg-surface py-[3px] pr-[9px] pl-[15px]"
+    >
+      <Link
+        href={taskHref(task.id)}
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-[11px]"
+      >
+        <span className="text-[19px] opacity-60" aria-hidden>
+          {task.emoji}
+        </span>
+        <span className="truncate text-[13.5px] font-semibold text-text-faint">{task.name}</span>
+      </Link>
+      <button
+        type="button"
+        onClick={onBringBack}
+        aria-label={`Bring back ${task.name}`}
+        className="flex min-h-11 shrink-0 items-center gap-[5px] rounded-[10px] bg-screen px-[11px] text-text-muted"
+      >
+        <Undo2 size={12} strokeWidth={2} aria-hidden />
+        <span className="text-[12px] font-semibold">Bring back</span>
+      </button>
     </li>
   );
 }

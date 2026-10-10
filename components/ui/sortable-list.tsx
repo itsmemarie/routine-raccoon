@@ -1,26 +1,19 @@
 "use client";
 
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
+import { closestCenter, DndContext, type DragEndEvent } from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
-  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { ReactNode } from "react";
+import { pickupFeedback } from "@/lib/platform/haptics";
+import { GRIP_TOUCH_CLASS, useDragSensors } from "./drag-sensors";
 
 export interface SortableRenderArgs {
-  /** Drag handle (grip) to place inside the row; works with touch, mouse and keyboard. */
+  /** Drag handle (grip) to place inside the row: long-press on touch, mouse, or keyboard. */
   readonly handle: ReactNode;
   readonly dragging: boolean;
   readonly index: number;
@@ -53,7 +46,7 @@ function Row<T extends { id: string }>({
       {...attributes}
       {...listeners}
       aria-label={`Move ${name}`}
-      className="-m-2 flex size-11 shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing"
+      className={`-m-2 flex size-11 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing ${GRIP_TOUCH_CLASS}`}
     >
       <span aria-hidden className="flex flex-col gap-[3px]">
         {[0, 1, 2].map((i) => (
@@ -77,8 +70,8 @@ function Row<T extends { id: string }>({
 }
 
 /**
- * A vertical list reorderable by drag (grip) or keyboard. Reports a move as "put `id` right
- * after `afterId`" (null = first), which is how the rank commands place items.
+ * A vertical list reorderable by drag (grip; long-press on touch) or keyboard. Reports a move as
+ * "put `id` right after `afterId`" (null = first), which is how the rank commands place items.
  */
 export function SortableList<T extends { id: string }>({
   items,
@@ -95,10 +88,7 @@ export function SortableList<T extends { id: string }>({
   label: string;
   className?: string;
 }) {
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useDragSensors();
   const ids = items.map((i) => i.id);
   const byId = new Map(items.map((i) => [i.id, i]));
   const name = (id: string | number) => {
@@ -119,6 +109,7 @@ export function SortableList<T extends { id: string }>({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={pickupFeedback}
       onDragEnd={onDragEnd}
       accessibility={{
         announcements: {
@@ -163,4 +154,18 @@ export function neighbourMove<T extends { id: string }>(
   if (target < 0 || target >= items.length) return undefined;
   const without = items.filter((_, i) => i !== index);
   return target === 0 ? null : (without[target - 1]?.id ?? null);
+}
+
+/** Applies a SortableList move: `id` goes right after `afterId` (null = first). */
+export function applyMove<T extends { id: string }>(
+  items: readonly T[],
+  id: string,
+  afterId: string | null,
+): T[] {
+  const moving = items.find((i) => i.id === id);
+  if (!moving) return [...items];
+  const rest = items.filter((i) => i.id !== id);
+  const at = afterId === null ? 0 : rest.findIndex((i) => i.id === afterId) + 1;
+  if (afterId !== null && at === 0) return [...items];
+  return [...rest.slice(0, at), moving, ...rest.slice(at)];
 }

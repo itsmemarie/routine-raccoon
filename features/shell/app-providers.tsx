@@ -10,6 +10,7 @@ import { getEnv } from "@/lib/env";
 import { toAppError, type AppError } from "@/lib/errors/app-error";
 import { installGlobalErrorHandlers } from "@/lib/errors/global-handlers";
 import { reportError } from "@/lib/errors/report";
+import { registerServiceWorker } from "@/lib/platform/service-worker";
 import { initTelemetry } from "@/lib/telemetry/telemetry";
 import { TimerBar } from "@/features/timer";
 import { DayController } from "./day-controller";
@@ -39,7 +40,8 @@ async function bootApp(): Promise<GateState> {
  * App shell (page P00): telemetry, global error handlers (RR-APP-002 → toast), and the
  * database gate. Nothing renders until local storage is open and the baseline exists; if that
  * fails the user sees RR-DB-001 / RR-DB-004 / RR-APP-006 with a retry, never a blank screen.
- * Once ready it also runs the day controller and shows the pinned timer bar.
+ * Once ready it also runs the day controller and shows the pinned timer bar. On the web
+ * production build it registers the offline app shell for the installed app.
  */
 export function AppProviders({ children }: { children: ReactNode }) {
   const [gate, setGate] = useState<GateState>({ status: "loading" });
@@ -58,6 +60,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     void bootApp().then((next) => {
       if (active) setGate(next);
     });
+    void registerServiceWorker();
     return () => {
       active = false;
       uninstall();

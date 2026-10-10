@@ -183,7 +183,7 @@ function TaskForm({
       importPastedList(defaultContext(), { sectionId: state.sectionId, tasks: drafts }),
       { onInputError: showError, success: () => importToast(drafts) },
     );
-    if (result.ok) router.replace("/");
+    if (result.ok) leave("/");
   };
 
   const save = async () => {
@@ -214,7 +214,8 @@ function TaskForm({
         success: (v) => `Added to ${v.sectionName}${copied(v.copiedTo)}`,
       });
       setSaving(false);
-      if (result.ok) router.replace("/");
+      // Back to where "Add task" was tapped (Today keeps its scroll position).
+      if (result.ok) leave("/");
     }
   };
 
@@ -510,7 +511,8 @@ function TaskForm({
             void run(deleteTask(defaultContext(), { taskId }), {
               success: `Deleted ${initial.name}`,
             }).then((r) => {
-              if (r.ok) router.replace("/");
+              // The task's detail page behind this one is gone: go to Today, keeping its scroll.
+              if (r.ok) router.replace("/", { scroll: false });
             });
           }}
         />
