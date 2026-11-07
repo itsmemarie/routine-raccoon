@@ -2,6 +2,7 @@ import { bootstrapDatabase } from "@/data/bootstrap";
 import { compareRank } from "@/domain/rank";
 import { parsePastedList, type PastedTaskDraft } from "@/domain/paste-parser";
 import { testContext } from "@/tests/db";
+import { linkSection, unlinkSection } from "./rows";
 import {
   copyTaskToPlan,
   createTask,
@@ -10,6 +11,7 @@ import {
   importPastedList,
   moveTask,
   patchTask,
+  removeTaskFromPlan,
   updateTask,
 } from "./tasks";
 import type { TaskDraft } from "./validate";
@@ -34,6 +36,12 @@ describe("task commands", () => {
     const sections = await t.db.sections.bulkGet(links.map((l) => l.section_id));
     const found = sections.find((s) => s?.name === name);
     if (!found) throw new Error(`no section ${name}`);
+    return found;
+  }
+
+  async function planByName(name: string) {
+    const found = (await t.db.day_plans.toArray()).find((p) => p.name === name);
+    if (!found) throw new Error(`no plan ${name}`);
     return found;
   }
 
@@ -72,7 +80,7 @@ describe("task commands", () => {
   describe("createTask", () => {
     it("adds the task at the end of the section, cleans input and logs `added`", async () => {
       const morning = await sectionByName("Morning");
-      const result = await createTask(t.ctx, { draft: draft(morning.id), copyToLevels: [] });
+      const result = await createTask(t.ctx, { draft: draft(morning.id) });
       expect(result.ok).toBe(true);
       const task = await taskByName("Take vitamins");
       expect(task).toMatchObject({ emoji: "💊", section_id: morning.id, _dirty: 1 });
@@ -85,11 +93,13 @@ describe("task commands", () => {
       ]);
     });
 
-    it("copies into the picked survival plans: same-named section, first section, or a new one", async () => {
+    it("copies into the picked plans: same-named section, first section, or a new one", async () => {
       const morning = await sectionByName("Morning");
+      const bareMinimum = await planByName("Bare minimum");
+      const badDay = await planByName("Bad day");
       const result = await createTask(t.ctx, {
         draft: draft(morning.id, { name: "Stretch" }),
-        copyToLevels: [1, 2, 2],
+        copyTo: { sectionIds: [], planIds: [badDay.id, bareMinimum.id, badDay.id] },
       });
       expect(result.ok && result.value.copiedTo).toEqual(["Bare minimum", "Bad day"]);
       const copies = (await t.db.tasks.toArray()).filter((x) => x.name === "Stretch");
@@ -117,10 +127,107 @@ describe("task commands", () => {
       const morning = await sectionByName("Morning");
       await createTask(t.ctx, {
         draft: draft(morning.id, { name: "Sip water" }),
-        copyToLevels: [3],
+        copyTo: { sectionIds: [], planIds: [zero?.id ?? ""] },
       });
       const created = await sectionByName("Morning", "Zero energy");
       expect(await orderedNames(created.id)).toEqual(["Sip water"]);
+    });
+
+    it("copies into plans the user made and the primary plan, not only survival plans", async () => {
+      const morning = await sectionByName("Morning");
+      const travelling = await planByName("Travelling");
+      await createTask(t.ctx, {
+        draft: draft(morning.id, { name: "Stretch" }),
+        copyTo: { sectionIds: [], planIds: [travelling.id] },
+      });
+      const leaving = await sectionByName("Before leaving", "Travelling");
+      expect((await orderedNames(leaving.id)).at(-1)).toBe("Stretch");
+      const inTravelling = (await t.db.tasks.toArray()).find(
+        (x) => x.name === "Stretch" && x.section_id === leaving.id,
+      );
+      expect(inTravelling?.survival_level).toBeNull();
+
+      const badMorning = await sectionByName("Morning", "Bad day");
+      const normal = await planByName("Normal");
+      await createTask(t.ctx, {
+        draft: draft(badMorning.id, { name: "Open a window" }),
+        copyTo: { sectionIds: [], planIds: [normal.id] },
+      });
+      expect((await orderedNames(morning.id)).at(-1)).toBe("Open a window");
+      const inNormal = (await t.db.tasks.toArray()).find(
+        (x) => x.name === "Open a window" && x.section_id === morning.id,
+      );
+      expect(inNormal?.survival_level).toBeNull();
+    });
+
+    it("repeats a task across sections of the plan as separate tasks", async () => {
+      const morning = await sectionByName("Morning");
+      const smash = await sectionByName("Smash it");
+      const evening = await sectionByName("Evening");
+      const result = await createTask(t.ctx, {
+        draft: draft(morning.id, { name: "Drink water" }),
+        copyTo: { sectionIds: [smash.id, evening.id], planIds: [] },
+      });
+      expect(result.ok && result.value.sectionName).toBe("Morning");
+      expect(result.ok && result.value.copiedTo).toEqual(["Smash it", "Evening"]);
+
+      const rows = (await t.db.tasks.toArray()).filter((x) => x.name === "Drink water");
+      expect(rows.map((x) => x.section_id).sort()).toEqual(
+        [morning.id, smash.id, evening.id].sort(),
+      );
+      expect(new Set(rows.map((x) => x.id)).size).toBe(3);
+      // Ticking a step on one copy must never tick it on another.
+      expect(new Set(rows.flatMap((x) => x.steps.map((s) => s.id))).size).toBe(6);
+
+      const log = await t.db.log_entries.where("kind").equals("added").toArray();
+      expect(log.filter((l) => l.title === "Added Drink water").map((l) => l.meta)).toEqual([
+        "Morning · 5 min",
+        "Copy in Smash it",
+        "Copy in Evening",
+      ]);
+    });
+
+    it("gives a plan that already shows the task no second copy", async () => {
+      const morning = await sectionByName("Morning");
+      const evening = await sectionByName("Evening");
+      const travelling = await planByName("Travelling");
+
+      // Morning sits in Travelling too, so the original already shows there.
+      await linkSection(t.ctx, travelling.id, morning.id);
+      const shared = await createTask(t.ctx, {
+        draft: draft(morning.id, { name: "Stretch" }),
+        copyTo: { sectionIds: [], planIds: [travelling.id] },
+      });
+      expect(shared.ok && shared.value.copiedTo).toEqual([]);
+      expect(await orderedNames(morning.id)).toContain("Stretch");
+      expect((await t.db.tasks.toArray()).filter((x) => x.name === "Stretch")).toHaveLength(1);
+      await unlinkSection(t.ctx, travelling.id, morning.id);
+
+      // Evening sits in Travelling, so the section copy already shows there.
+      await linkSection(t.ctx, travelling.id, evening.id);
+      const viaCopy = await createTask(t.ctx, {
+        draft: draft(morning.id, { name: "Yawn" }),
+        copyTo: { sectionIds: [evening.id], planIds: [travelling.id] },
+      });
+      expect(viaCopy.ok && viaCopy.value.copiedTo).toEqual(["Evening"]);
+      expect((await t.db.tasks.toArray()).filter((x) => x.name === "Yawn")).toHaveLength(2);
+    });
+
+    it("skips picks that have gone instead of refusing to save", async () => {
+      const morning = await sectionByName("Morning");
+      const evening = await sectionByName("Evening");
+      const travelling = await planByName("Travelling");
+      await t.db.sections.update(evening.id, { archived_at: "2026-09-01T00:00:00Z" });
+      await t.db.day_plans.update(travelling.id, { deleted_at: "2026-09-01T00:00:00Z" });
+      const result = await createTask(t.ctx, {
+        draft: draft(morning.id, { name: "Stretch" }),
+        copyTo: {
+          sectionIds: [evening.id, morning.id, "00000000-0000-4000-8000-00000000dead"],
+          planIds: [travelling.id, "00000000-0000-4000-8000-00000000beef"],
+        },
+      });
+      expect(result.ok && result.value.copiedTo).toEqual([]);
+      expect((await t.db.tasks.toArray()).filter((x) => x.name === "Stretch")).toHaveLength(1);
     });
 
     it.each([
@@ -147,7 +254,6 @@ describe("task commands", () => {
       const before = await t.db.tasks.count();
       const result = await createTask(t.ctx, {
         draft: draft(morning.id, overrides),
-        copyToLevels: [],
       });
       expect(result.ok ? null : result.error.code).toBe(code);
       expect(await t.db.tasks.count()).toBe(before);
@@ -156,7 +262,7 @@ describe("task commands", () => {
     it("rejects a deleted section with RR-DB-005", async () => {
       const morning = await sectionByName("Morning");
       await t.db.sections.update(morning.id, { deleted_at: "2026-09-01T00:00:00Z" });
-      const result = await createTask(t.ctx, { draft: draft(morning.id), copyToLevels: [] });
+      const result = await createTask(t.ctx, { draft: draft(morning.id) });
       expect(result.ok ? null : result.error.code).toBe("RR-DB-005");
     });
 
@@ -169,7 +275,6 @@ describe("task commands", () => {
           mantra: "m".repeat(500),
           location: "l".repeat(500),
         }),
-        copyToLevels: [],
       });
       const task = (await t.db.tasks.toArray()).find((x) => x.name.startsWith("xxx"));
       expect(task?.name).toHaveLength(80);
@@ -192,7 +297,6 @@ describe("task commands", () => {
           hard: true,
           steps: dinner.steps,
         }),
-        copyToLevels: [],
       });
       expect(result.ok).toBe(true);
       const saved = await taskByName("Prepare dinner");
@@ -208,9 +312,39 @@ describe("task commands", () => {
       await updateTask(t.ctx, {
         taskId: pint.id,
         draft: draft(evening.id, { name: pint.name, emoji: pint.emoji, minutes: pint.minutes }),
-        copyToLevels: [],
       });
       expect((await orderedNames(evening.id)).at(-1)).toBe("Drink a pint");
+    });
+
+    it("copies from the edit form too, leaving the original where it is", async () => {
+      const pint = await taskByName("Drink a pint");
+      const morning = await sectionByName("Morning");
+      const evening = await sectionByName("Evening");
+      const result = await updateTask(t.ctx, {
+        taskId: pint.id,
+        draft: draft(morning.id, { name: pint.name, emoji: pint.emoji, minutes: pint.minutes }),
+        copyTo: { sectionIds: [evening.id], planIds: [] },
+      });
+      expect(result.ok && result.value.copiedTo).toEqual(["Evening"]);
+      expect((await t.db.tasks.get(pint.id))?.section_id).toBe(morning.id);
+      expect(await orderedNames(evening.id)).toContain("Drink a pint");
+    });
+
+    it("brings the task back into a plan it was removed from, instead of copying", async () => {
+      const pint = await taskByName("Drink a pint");
+      const morning = await sectionByName("Morning");
+      const travelling = await planByName("Travelling");
+      await linkSection(t.ctx, travelling.id, morning.id);
+      await removeTaskFromPlan(t.ctx, { taskId: pint.id, planId: travelling.id });
+      const before = await t.db.tasks.count();
+      const result = await updateTask(t.ctx, {
+        taskId: pint.id,
+        draft: draft(morning.id, { name: pint.name, emoji: pint.emoji, minutes: pint.minutes }),
+        copyTo: { sectionIds: [], planIds: [travelling.id] },
+      });
+      expect(result.ok && result.value.copiedTo).toEqual(["Travelling"]);
+      expect((await t.db.tasks.get(pint.id))?.excluded_plan_ids).toEqual([]);
+      expect(await t.db.tasks.count()).toBe(before);
     });
 
     it("keeps smaller-version fields the form doesn't edit", async () => {
@@ -226,7 +360,6 @@ describe("task commands", () => {
           minutes: 2,
           smaller: { minutes: null, text: "Just a sip" },
         }),
-        copyToLevels: [],
       });
       expect((await taskByName("Drink a pint")).smaller_versions).toEqual({
         steps: [{ id: "x", text: "Sip" }],

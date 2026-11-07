@@ -143,6 +143,8 @@ type TaskRow = {
   location: string;
   steps: Json;
   smaller_versions: Json;
+  /** Day Plans the task was removed from while its section stays there. */
+  excluded_plan_ids: Json;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -250,6 +252,7 @@ export type Database = {
         | "location"
         | "steps"
         | "smaller_versions"
+        | "excluded_plan_ids"
         | "archived_at"
         | "deleted_at",
         [

@@ -1,5 +1,5 @@
 import { addDays, daysBetween, daysInMonth, partsOf, weekdayOf } from "./time";
-import { buildToday, type DayInput } from "./today";
+import { buildToday, createdDayOf, type DayInput } from "./today";
 import {
   isLive,
   type DayKey,
@@ -12,11 +12,14 @@ import {
 
 /**
  * Progress, "kept not scored" (PRD R13): no points, no streaks.
+ * - Past days are rebuilt from today's definitions, so an open task only counts on a day if it
+ *   and its plan link already existed that day (the day it was added counts). Ticks always count.
  * - A day is CLEARED when every task its plan scheduled was ticked (skipped tasks excluded).
  * - Showed up = cleared days in either mode. Full days = cleared without Survival Mode, unless
  *   "A Survival Mode Day counts as a full day" is on (open decision Q2, default off).
- * - "Avoiding this" lists tasks not done for 4+ scheduled days running. Days the app wasn't
- *   used at all are neutral: they neither extend nor break a run.
+ * - "Avoiding this" lists tasks not done for 4+ days running. A day adds to a run only if the task
+ *   counted on that day's plan and wasn't ticked. A tick on any plan ends the run. Other days are
+ *   neutral, including days the app wasn't used at all: they neither extend nor break a run.
  *
  * @see docs/handoff/README.md screen 17
  */
@@ -85,8 +88,10 @@ export interface DayFacts {
   readonly ticked: number;
   readonly total: number;
   readonly survivalOn: boolean;
-  /** Status of every task scheduled that day. */
+  /** Status of every task that counts on that day's plan. */
   readonly status: ReadonlyMap<string, TaskStatus>;
+  /** Every task ticked that day, on any plan. */
+  readonly doneTaskIds: ReadonlySet<string>;
   /** The user did something that day (ticked or skipped anything). */
   readonly active: boolean;
 }
@@ -109,32 +114,49 @@ function factsFor(
 ): DayFacts {
   const occurrences = (occurrencesByDay.get(dayKey) ?? []).filter(isLive);
   const record = (recordsByDay.get(dayKey) ?? []).find(isLive) ?? null;
+  // A deleted task keeps the ticks it earned: on a day it was ticked, it still counts.
+  const tickedIds = new Set(occurrences.filter((o) => o.status === "done").map((o) => o.task_id));
   const view = buildToday({
     ...input.definitions,
+    tasks: input.definitions.tasks.map((t) =>
+      t.deleted_at !== null && tickedIds.has(t.id) ? { ...t, deleted_at: null } : t,
+    ),
     dayKey,
     occurrences,
     dayRecord: record,
     settings: input.settings,
     filter: "all",
   });
+  const { resetAt } = input.settings;
+  const existed = (row: { created_at: string }) =>
+    daysBetween(createdDayOf(row, resetAt), dayKey) >= 0;
+  const linkExisted = (sectionId: string) =>
+    input.definitions.planSections.some(
+      (link) =>
+        link.plan_id === view.activePlan?.id &&
+        link.section_id === sectionId &&
+        isLive(link) &&
+        existed(link),
+    );
   const status = new Map<string, TaskStatus>();
   let ticked = 0;
   let total = 0;
   for (const section of view.sections) {
+    const linked = linkExisted(section.section.id);
     for (const item of section.tasks) {
+      if (!item.done && !(linked && existed(item.task))) continue;
       total++;
       if (item.done) ticked++;
       status.set(item.task.id, item.done ? "done" : "open");
     }
-  }
-  for (const o of occurrences) {
-    if (o.status === "skipped") status.set(o.task_id, "skipped");
+    for (const item of section.skipped) status.set(item.task.id, "skipped");
   }
   return {
     ticked,
     total,
     survivalOn: view.survivalOn,
     status,
+    doneTaskIds: new Set(occurrences.filter((o) => o.status === "done").map((o) => o.task_id)),
     active: occurrences.some((o) => o.status === "done" || o.status === "skipped"),
   };
 }
@@ -146,16 +168,14 @@ export function skipRun(
   factsOf: (dayKey: DayKey) => DayFacts,
 ): number {
   let run = 0;
-  const todays = factsOf(today).status.get(taskId);
-  if (todays === "done") return 0;
-  if (todays === "skipped") run++;
+  const todays = factsOf(today);
+  if (todays.doneTaskIds.has(taskId)) return 0;
+  if (todays.status.get(taskId) === "skipped") run++;
   for (let i = 1; i <= LOOKBACK_DAYS; i++) {
     const facts = factsOf(addDays(today, -i));
     if (!facts.active) continue;
-    const status = facts.status.get(taskId);
-    if (status === undefined) continue;
-    if (status === "done") break;
-    run++;
+    if (facts.doneTaskIds.has(taskId)) break;
+    if (facts.status.has(taskId)) run++;
   }
   return run;
 }
@@ -219,15 +239,30 @@ export function buildProgress(input: ProgressInput): ProgressView {
   }
 
   const tasksById = new Map(input.definitions.tasks.map((t) => [t.id, t]));
-  const habits = [...habitMap.entries()]
-    .flatMap(([taskId, counts]) => {
-      const task = tasksById.get(taskId);
-      return task ? [{ task, ...counts }] : [];
-    })
-    .sort(
-      (a, b) =>
-        b.done - a.done || b.scheduled - a.scheduled || a.task.name.localeCompare(b.task.name),
-    );
+  const sectionsById = new Map(input.definitions.sections.map((s) => [s.id, s]));
+  const nameKey = (name: string) => name.trim().toLowerCase();
+  // Copies (Separate, Copy to Day Plan, Also add to) are the same habit in another plan. They ran
+  // on different days, so one row with their counts added is the honest picture.
+  const habitRows = new Map<string, HabitRow>();
+  for (const [taskId, counts] of habitMap) {
+    const task = tasksById.get(taskId);
+    if (!task) continue;
+    const key = `${nameKey(task.name)}|${nameKey(sectionsById.get(task.section_id)?.name ?? "")}`;
+    const seen = habitRows.get(key);
+    if (!seen) habitRows.set(key, { task, ...counts });
+    else {
+      const lead = counts.done > seen.done ? task : seen.task;
+      habitRows.set(key, {
+        task: lead,
+        done: seen.done + counts.done,
+        scheduled: seen.scheduled + counts.scheduled,
+      });
+    }
+  }
+  const habits = [...habitRows.values()].sort(
+    (a, b) =>
+      b.done - a.done || b.scheduled - a.scheduled || a.task.name.localeCompare(b.task.name),
+  );
 
   const minutesBySection = new Map<string, number>();
   const monthEnd = addDays(first, length - 1);
@@ -241,13 +276,17 @@ export function buildProgress(input: ProgressInput): ProgressView {
       (minutesBySection.get(task.section_id) ?? 0) + (o.minutes_credited ?? task.minutes),
     );
   }
-  const sectionsById = new Map(input.definitions.sections.map((s) => [s.id, s]));
-  const timeBySection = [...minutesBySection.entries()]
-    .flatMap(([sectionId, minutes]) => {
-      const section = sectionsById.get(sectionId);
-      return section && isLive(section) ? [{ section, minutes }] : [];
-    })
-    .sort((a, b) => b.minutes - a.minutes);
+  const timeRows = new Map<string, SectionTime>();
+  for (const [sectionId, minutes] of minutesBySection) {
+    const section = sectionsById.get(sectionId);
+    if (!section || !isLive(section)) continue;
+    const seen = timeRows.get(nameKey(section.name));
+    timeRows.set(nameKey(section.name), {
+      section: seen && seen.minutes >= minutes ? seen.section : section,
+      minutes: (seen?.minutes ?? 0) + minutes,
+    });
+  }
+  const timeBySection = [...timeRows.values()].sort((a, b) => b.minutes - a.minutes);
 
   const avoided = input.definitions.tasks
     .filter((t) => isLive(t) && t.archived_at === null)

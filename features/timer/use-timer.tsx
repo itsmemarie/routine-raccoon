@@ -17,6 +17,7 @@ import type { DayKey } from "@/domain/types";
 import { AppError } from "@/lib/errors/app-error";
 import type { PageId } from "@/lib/errors/pages";
 import { reportError } from "@/lib/errors/report";
+import { primeChime } from "@/lib/platform/chime";
 import { getNotificationScheduler } from "@/lib/platform/notifications";
 import { useRun } from "@/features/common";
 
@@ -71,6 +72,8 @@ export function useTimerControls(pageId: PageId, dayKey: DayKey | null) {
   const begin = useCallback(
     async (taskId: string) => {
       if (!dayKey) return;
+      // Still inside the tap, the only moment a browser allows sound to be unlocked.
+      void primeChime();
       const result = await run(startTimer(defaultContext(), { taskId, dayKey }), {
         success: (v) => `Timer running for ${v.timer.taskName}`,
       });

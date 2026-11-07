@@ -9,6 +9,7 @@ import {
   skipRunLabel,
   type ProgressInput,
 } from "./progress";
+import { primaryPlan } from "./survival";
 import type { Occurrence } from "./types";
 
 // Today = Tuesday 8 Sep 2026. Two daily tasks, created at the start of August.
@@ -180,6 +181,177 @@ describe("skipRun", () => {
     expect(skipRunLabel(0)).toBeNull();
     expect(skipRunLabel(1)).toBe("1 day");
     expect(skipRunLabel(5)).toBe("5 days running");
+  });
+});
+
+describe("a task only counts on days it was on the plan", () => {
+  const MORNING = "00000000-0000-4000-8000-0000000000a1";
+  const EXTRA_SECTION = "00000000-0000-4000-8000-0000000000a3";
+  const HABIT = "00000000-0000-4000-8000-0000000000b4";
+  const PACK = "00000000-0000-4000-8000-0000000000b5";
+
+  const noon = (day: string) => new Date(`${day}T12:00:00`).toISOString();
+  const primaryId = (input: ProgressInput) => primaryPlan(input.definitions.plans)?.id ?? "";
+  /** Pint ticked from 1 to 7 Sep, so all seven days count as active and Walk is never done. */
+  const activeWeek = Array.from({ length: 7 }, (_, i) => done(PINT, addDays("2026-09-01", i)));
+
+  function withHabit(input: ProgressInput, createdAt: string, sectionId = MORNING): ProgressInput {
+    const habit = task({
+      id: HABIT,
+      section_id: sectionId,
+      name: "New habit",
+      created_at: createdAt,
+    });
+    return {
+      ...input,
+      definitions: { ...input.definitions, tasks: [...input.definitions.tasks, habit] },
+    };
+  }
+
+  /** Adds a second regular plan, Travelling, with one task of its own. */
+  function withTravelling(input: ProgressInput) {
+    const travelling = plan({
+      name: "Travelling",
+      kind: "custom",
+      rank: "a2",
+      created_at: CREATED,
+    });
+    const trip = section({ id: EXTRA_SECTION, name: "Trip", created_at: CREATED });
+    const pack = task({ id: PACK, section_id: trip.id, name: "Pack", created_at: CREATED });
+    const { plans, planSections, sections, tasks } = input.definitions;
+    return {
+      planId: travelling.id,
+      input: {
+        ...input,
+        definitions: {
+          plans: [...plans, travelling],
+          planSections: [...planSections, link(travelling.id, trip.id)],
+          sections: [...sections, trip],
+          tasks: [...tasks, pack],
+        },
+      },
+    };
+  }
+
+  it("doesn't call a habit added yesterday avoided", () => {
+    const input = withHabit(world(activeWeek), noon("2026-09-07"));
+    expect(buildProgress(input).avoided.map((a) => [a.task.name, a.run])).toEqual([["Walk", 7]]);
+    expect(skipRun(HABIT, TODAY, dayFactsReader(input))).toBe(1);
+  });
+
+  it("counts a habit from the day it was added", () => {
+    const input = withHabit(world(activeWeek), noon("2026-09-03"));
+    expect(buildProgress(input).avoided.map((a) => [a.task.name, a.run])).toEqual([
+      ["Walk", 7],
+      ["New habit", 5],
+    ]);
+  });
+
+  it("uses the app day, so a task added before the reset time belongs to the day before", () => {
+    const input = withHabit(
+      world(activeWeek, { settings: settings({ resetAt: "02:00" }) }),
+      new Date("2026-09-05T01:30:00").toISOString(),
+    );
+    expect(skipRun(HABIT, TODAY, dayFactsReader(input))).toBe(4);
+  });
+
+  it("counts an old task in a section from the day that section joined the plan", () => {
+    const base = withHabit(world(activeWeek), CREATED, EXTRA_SECTION);
+    const added = section({ id: EXTRA_SECTION, name: "Evening", created_at: CREATED });
+    const joined = { ...link(primaryId(base), added.id), created_at: noon("2026-09-06") };
+    const input = {
+      ...base,
+      definitions: {
+        ...base.definitions,
+        sections: [...base.definitions.sections, added],
+        planSections: [...base.definitions.planSections, joined],
+      },
+    };
+    expect(skipRun(HABIT, TODAY, dayFactsReader(input))).toBe(2);
+  });
+
+  it("leaves older days alone when a habit is added", () => {
+    const occurrences = [done(PINT, "2026-09-02"), done(WALK, "2026-09-02")];
+    const view = buildProgress(withHabit(world(occurrences), noon("2026-09-05")));
+    expect(view.cells[1]).toMatchObject({ state: "full", ticked: 2, total: 2 });
+    expect(view).toMatchObject({ showedUp: 1, fullDays: 1 });
+    expect(view.habits.find((h) => h.task.id === HABIT)).toMatchObject({ done: 0, scheduled: 4 });
+  });
+
+  it("keeps a tick dated before the task was added", () => {
+    const occurrences = [
+      done(PINT, "2026-09-02"),
+      done(WALK, "2026-09-02"),
+      done(HABIT, "2026-09-02"),
+    ];
+    const view = buildProgress(withHabit(world(occurrences), noon("2026-09-05")));
+    expect(view.cells[1]).toMatchObject({ state: "full", ticked: 3, total: 3 });
+  });
+
+  it("still shows a task added today in today's count", () => {
+    const occurrences = [done(PINT, TODAY), done(WALK, TODAY)];
+    const view = buildProgress(withHabit(world(occurrences), noon(TODAY)));
+    expect(view.cells[7]).toMatchObject({ state: "today", ticked: 2, total: 3 });
+  });
+
+  it("treats a day on another plan as neutral for tasks that weren't on it", () => {
+    const { input, planId } = withTravelling(world(activeWeek));
+    const factsOf = dayFactsReader({
+      ...input,
+      dayRecords: [
+        dayRecord({ day_key: "2026-09-04", plan_id: planId }),
+        dayRecord({ day_key: "2026-09-05", plan_id: planId }),
+      ],
+    });
+    expect(skipRun(WALK, TODAY, factsOf)).toBe(5);
+    expect(skipRun(PACK, TODAY, factsOf)).toBe(2);
+  });
+
+  it("ignores a skip left behind by switching to another plan", () => {
+    const { input, planId } = withTravelling(
+      world([done(PINT, "2026-09-03"), skipped(WALK, "2026-09-04"), done(PINT, "2026-09-05")]),
+    );
+    const factsOf = dayFactsReader({
+      ...input,
+      dayRecords: [dayRecord({ day_key: "2026-09-04", plan_id: planId })],
+    });
+    expect(skipRun(WALK, TODAY, factsOf)).toBe(2);
+  });
+
+  it("ends a run with a tick made on another plan", () => {
+    const { input, planId } = withTravelling(
+      world([done(PINT, "2026-09-03"), done(WALK, "2026-09-04"), done(PINT, "2026-09-05")]),
+    );
+    const factsOf = dayFactsReader({
+      ...input,
+      dayRecords: [dayRecord({ day_key: "2026-09-04", plan_id: planId })],
+    });
+    expect(skipRun(WALK, TODAY, factsOf)).toBe(1);
+  });
+
+  it("ends a run with a tick today on another plan", () => {
+    const { input, planId } = withTravelling(world([...activeWeek, done(WALK, TODAY)]));
+    const factsOf = dayFactsReader({
+      ...input,
+      dayRecords: [dayRecord({ day_key: TODAY, plan_id: planId })],
+    });
+    expect(skipRun(WALK, TODAY, factsOf)).toBe(0);
+  });
+
+  it("judges past days against the plan that was primary then", () => {
+    const { input, planId } = withTravelling(world(activeWeek));
+    const normalId = primaryId(input);
+    const plans = input.definitions.plans.map((p) => {
+      if (p.id === normalId) return { ...p, kind: "custom" as const };
+      return p.id === planId ? { ...p, kind: "primary" as const } : p;
+    });
+    const factsOf = dayFactsReader({
+      ...input,
+      definitions: { ...input.definitions, plans },
+      settings: settings({ primaryHistory: [{ planId: normalId, until: "2026-09-05" }] }),
+    });
+    expect(skipRun(WALK, TODAY, factsOf)).toBe(4); // 1–4 Sep, on Normal
+    expect(skipRun(PACK, TODAY, factsOf)).toBe(3); // 5–7 Sep, on Travelling
   });
 });
 

@@ -4,7 +4,10 @@ import { useId, useState, type ReactNode } from "react";
 import { Button } from "./button";
 import { Dialog } from "./sheet";
 
-/** "Delete “X”?" style confirmation (handoff screen 9). Confirm is the primary action. */
+/**
+ * "Delete “X”?" style confirmation (handoff screen 9). Confirm is the primary action; `alternative`
+ * adds a second way to go ahead, for when there are two.
+ */
 export function ConfirmDialog({
   title,
   body,
@@ -12,6 +15,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   cancelLabel = "Cancel",
+  alternative,
 }: {
   title: string;
   body: ReactNode;
@@ -19,11 +23,17 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
   cancelLabel?: string;
+  alternative?: { readonly label: string; readonly onSelect: () => void };
 }) {
   return (
     <Dialog title={title} description={body} onClose={onCancel} role="alertdialog" testId="confirm">
       <div className="mt-[18px] flex flex-col gap-2">
         <Button onClick={onConfirm}>{confirmLabel}</Button>
+        {alternative ? (
+          <Button variant="tint" onClick={alternative.onSelect}>
+            {alternative.label}
+          </Button>
+        ) : null}
         <Button variant="tertiary" onClick={onCancel}>
           {cancelLabel}
         </Button>

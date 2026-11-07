@@ -41,6 +41,14 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ defaultSurvivalLevel: 9 }).defaultLevel).toBe(2);
   });
 
+  it("keeps a valid primary history and resets a broken one", () => {
+    const entry = { planId: "00000000-0000-4000-8000-000000000001", until: "2026-09-05" };
+    expect(DEFAULT_SETTINGS.primaryHistory).toEqual([]);
+    expect(normalizeSettings({ primaryHistory: [entry] }).primaryHistory).toEqual([entry]);
+    expect(normalizeSettings({ primaryHistory: "x" }).primaryHistory).toEqual([]);
+    expect(normalizeSettings({ primaryHistory: [{ planId: 1 }] }).primaryHistory).toEqual([]);
+  });
+
   it("drops keys it doesn't know", () => {
     expect(normalizeSettings({ undoWindowSeconds: 9 })).not.toHaveProperty("undoWindowSeconds");
   });

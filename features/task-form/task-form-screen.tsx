@@ -8,36 +8,40 @@ import { AddChip, ChoiceChip } from "@/components/ui/chip";
 import { ConfirmDialog, PromptDialog } from "@/components/ui/confirm";
 import { ContextCard, GroupHeading } from "@/components/ui/layout";
 import { canGoBack } from "@/components/ui/navigation";
+import { SAVE_BAR_CLEARANCE, SaveBar } from "@/components/ui/save-bar";
 import { FormBar, ScreenRoot } from "@/components/ui/screen";
 import { Sheet } from "@/components/ui/sheet";
 import { SwitchRow } from "@/components/ui/toggle";
 import { defaultContext } from "@/data/commands/context";
 import { createSection, SECTION_COLORS } from "@/data/commands/sections";
-import { createTask, deleteTask, importPastedList, updateTask } from "@/data/commands/tasks";
+import { createTask, importPastedList, updateTask } from "@/data/commands/tasks";
 import { useEffectiveDayKey } from "@/data/hooks/use-day-key";
 import { useTodaySnapshot, type TodaySnapshot } from "@/data/hooks/use-today-snapshot";
-import { activePlans, homePlanOf, sectionRows } from "@/domain/organise";
+import {
+  activePlans,
+  homePlanOf,
+  plansOfSection,
+  plansOfTask,
+  sectionRows,
+  taskPlacement,
+} from "@/domain/organise";
 import { importToast, parsePastedList, type PasteParseResult } from "@/domain/paste-parser";
 import { resolveDayPlans } from "@/domain/today";
-import type { DayKey, DayPlan } from "@/domain/types";
+import { isActive, isTaskInPlan, type DayKey, type DayPlan } from "@/domain/types";
 import { parseVideoUrl } from "@/domain/video";
 import { AppError } from "@/lib/errors/app-error";
-import { useRun } from "@/features/common";
+import { DeleteTaskDialog, useRun } from "@/features/common";
 import { FrequencyField } from "@/features/recurrence";
 import { EmojiPicker } from "./emoji-picker";
-import {
-  inputClass,
-  MinutesField,
-  SmallerVersionField,
-  StepsEditor,
-  SurvivalCopyField,
-} from "./fields";
+import { CopyToField, inputClass, MinutesField, SmallerVersionField, StepsEditor } from "./fields";
 import {
   isDirty,
   newTaskState,
   stateFromTask,
   toDraft,
   withName,
+  withPlan,
+  withSection,
   type TaskFormState,
 } from "./form-state";
 import { PasteDialog } from "./paste-dialog";
@@ -61,7 +65,11 @@ export function TaskFormScreen() {
   // Which plan the form is "Creating in": the section's plan, else today's plan.
   const plans = activePlans(snapshot);
   const sectionId = task?.section_id ?? sectionParam;
-  const fromSection = sectionId ? homePlanOf(snapshot, sectionId) : null;
+  const fromSection = task
+    ? (plansOfTask(snapshot, task).find(isActive) ?? null)
+    : sectionId
+      ? homePlanOf(snapshot, sectionId)
+      : null;
   const requested = planParam ? (plans.find((p) => p.id === planParam) ?? null) : null;
   const today = resolveDayPlans(snapshot.plans, snapshot.dayRecord, snapshot.settings).activePlan;
   const plan = requested ?? fromSection ?? today ?? plans[0] ?? null;
@@ -130,6 +138,7 @@ function TaskForm({
   };
   const survivalName = snapshot.settings.survivalName;
   const isEdit = taskId !== null;
+  const dirty = isDirty(initial, state);
   const update = (patch: Partial<TaskFormState>) => setState((s) => ({ ...s, ...patch }));
 
   const plans = activePlans(snapshot);
@@ -143,9 +152,20 @@ function TaskForm({
     currentSection && !sections.some((s) => s.id === currentSection.id)
       ? [currentSection, ...sections]
       : sections;
-  const survivalPlans = plans
-    .filter((p) => p.kind === "survival")
-    .sort((a, b) => (a.survival_level ?? 0) - (b.survival_level ?? 0));
+  // A section shared on purpose ("Also in") shows a new task in each plan: say so before saving.
+  const sharedWith =
+    !isEdit && currentSection
+      ? plansOfSection(snapshot, currentSection.id).filter((p) => p.id !== state.planId)
+      : [];
+  // "Also add to": a plan already showing the task needs no copy. A saved task can be out of a
+  // plan its section sits in; that plan stays offered, and picking it brings the task back.
+  const savedTask = snapshot.tasks.find((t) => t.id === taskId);
+  const showingTask = new Set(
+    (state.sectionId ? plansOfSection(snapshot, state.sectionId) : [])
+      .filter((p) => !savedTask || isTaskInPlan(savedTask, p.id))
+      .map((p) => p.id),
+  );
+  const otherPlans = plans.filter((p) => p.id !== plan?.id);
 
   const showError = (next: AppError) => {
     setError(next);
@@ -196,20 +216,20 @@ function TaskForm({
     setSaving(true);
     const ctx = defaultContext();
     const draft = toDraft(state, state.sectionId);
-    const copied = (names: readonly string[]) =>
-      names.length ? ` · copied to ${names.join(", ")}` : "";
+    const copyTo = { sectionIds: state.copyToSectionIds, planIds: state.copyToPlanIds };
+    const copied = (names: readonly string[]) => {
+      if (names.length === 0) return "";
+      return ` · copied to ${names.length > 3 ? `${names.length} places` : names.join(", ")}`;
+    };
     if (isEdit) {
-      const result = await run(
-        updateTask(ctx, { taskId, draft, copyToLevels: state.copyToLevels }),
-        {
-          onInputError: showError,
-          success: (v) => `Saved${copied(v.copiedTo)}`,
-        },
-      );
+      const result = await run(updateTask(ctx, { taskId, draft, copyTo }), {
+        onInputError: showError,
+        success: (v) => `Saved${copied(v.copiedTo)}`,
+      });
       setSaving(false);
       if (result.ok) leave(`/task/?id=${encodeURIComponent(taskId)}`);
     } else {
-      const result = await run(createTask(ctx, { draft, copyToLevels: state.copyToLevels }), {
+      const result = await run(createTask(ctx, { draft, copyTo }), {
         onInputError: showError,
         success: (v) => `Added to ${v.sectionName}${copied(v.copiedTo)}`,
       });
@@ -220,7 +240,7 @@ function TaskForm({
   };
 
   const cancel = () => {
-    if (isDirty(initial, state)) setSheet("discard");
+    if (dirty) setSheet("discard");
     else leave(isEdit ? `/task/?id=${encodeURIComponent(taskId)}` : "/");
   };
 
@@ -229,12 +249,13 @@ function TaskForm({
     : "No Day Plan";
 
   return (
-    <ScreenRoot pageId={PAGE} className="pb-12">
+    <ScreenRoot pageId={PAGE} className={SAVE_BAR_CLEARANCE}>
       <FormBar
         title={isEdit ? "Edit task" : "New task"}
         onCancel={cancel}
         onSave={() => void save()}
         busy={saving}
+        hideSave={dirty}
       />
       <div ref={topRef} className="scroll-mt-20 px-3.5 pt-3.5">
         {error ? <InlineError error={error} pageId={PAGE} className="mb-3.5" /> : null}
@@ -309,7 +330,7 @@ function TaskForm({
                 key={section.id}
                 dot={section.color}
                 selected={state.sectionId === section.id}
-                onClick={() => update({ sectionId: section.id })}
+                onClick={() => update(withSection(state, section.id))}
               >
                 {section.name}
               </ChoiceChip>
@@ -325,6 +346,12 @@ function TaskForm({
               </AddChip>
             ) : null}
           </div>
+          {currentSection && sharedWith.length > 0 ? (
+            <p className="mt-2 text-[11.5px] leading-normal text-text-muted">
+              {currentSection.name} is also in {sharedWith.map((p) => p.name).join(", ")}, so this
+              task will show there too.
+            </p>
+          ) : null}
         </section>
 
         <StepsEditor steps={state.steps} onChange={(steps) => update({ steps })} />
@@ -404,12 +431,21 @@ function TaskForm({
           onChange={(patch) => update(patch)}
         />
 
-        <SurvivalCopyField
-          plans={survivalPlans}
-          selected={state.copyToLevels}
+        <CopyToField
+          planName={plan?.name ?? ""}
+          sectionName={currentSection?.name ?? ""}
+          sections={sections.filter((s) => s.id !== state.sectionId)}
+          plans={otherPlans.filter((p) => !showingTask.has(p.id))}
+          // A new task already says this under Section (sharedWith).
+          alreadyIn={isEdit ? otherPlans.filter((p) => showingTask.has(p.id)) : []}
+          selectedSections={state.copyToSectionIds}
+          selectedPlans={state.copyToPlanIds}
           minutes={state.minutes}
+          smallerMinutes={state.smallerMinutes}
+          neverShrink={state.neverShrink}
           survivalName={survivalName}
-          onChange={(copyToLevels) => update({ copyToLevels })}
+          onSections={(copyToSectionIds) => update({ copyToSectionIds })}
+          onPlans={(copyToPlanIds) => update({ copyToPlanIds })}
         />
 
         {isEdit ? (
@@ -423,6 +459,7 @@ function TaskForm({
         ) : null}
       </div>
 
+      {dirty ? <SaveBar onSave={() => void save()} busy={saving} /> : null}
       {sheet === "emoji" ? (
         <EmojiPicker
           current={state.emoji}
@@ -442,7 +479,7 @@ function TaskForm({
                 selected={p.id === state.planId}
                 onClick={() => {
                   const first = sectionRows(snapshot, p.id)[0]?.section.id ?? null;
-                  update({ planId: p.id, sectionId: isEdit ? state.sectionId : first });
+                  update(withPlan(state, p.id, isEdit ? state.sectionId : first));
                   setSheet(null);
                 }}
               >
@@ -481,7 +518,7 @@ function TaskForm({
               { onInputError: setSectionError, success: (v) => `Added section ${v.name}` },
             ).then((result) => {
               if (!result.ok) return;
-              update({ sectionId: result.value.sectionId });
+              update(withSection(state, result.value.sectionId));
               setSheet(null);
             })
           }
@@ -500,20 +537,21 @@ function TaskForm({
           }}
         />
       ) : null}
-      {sheet === "delete" && taskId ? (
-        <ConfirmDialog
-          title={`Delete “${initial.name}”?`}
-          body="The task and its steps are removed for good. You can skip it for today instead."
-          confirmLabel="Delete task"
+      {sheet === "delete" && savedTask ? (
+        <DeleteTaskDialog
+          pageId={PAGE}
+          task={savedTask}
+          placement={taskPlacement(
+            snapshot,
+            savedTask,
+            resolveDayPlans(snapshot.plans, snapshot.dayRecord, snapshot.settings).activePlan?.id ??
+              null,
+          )}
           onCancel={() => setSheet(null)}
-          onConfirm={() => {
-            setSheet(null);
-            void run(deleteTask(defaultContext(), { taskId }), {
-              success: `Deleted ${initial.name}`,
-            }).then((r) => {
-              // The task's detail page behind this one is gone: go to Today, keeping its scroll.
-              if (r.ok) router.replace("/", { scroll: false });
-            });
+          onStart={() => setSheet(null)}
+          onFinish={(ok) => {
+            // The task's detail page behind this one is gone: go to Today, keeping its scroll.
+            if (ok) router.replace("/", { scroll: false });
           }}
         />
       ) : null}

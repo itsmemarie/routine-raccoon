@@ -1,14 +1,22 @@
 import { displayMinutes, formatDuration, isShrunk } from "./duration";
 import { compareRank } from "./rank";
 import { recursOn, recurrenceLabel } from "./recurrence";
-import { primaryPlan, sectionsOfPlan, survivalPlanFor, SURVIVAL_LEVELS } from "./survival";
-import { localDayKey } from "./time";
+import {
+  primaryPlan,
+  primaryPlanOn,
+  sectionsOfPlan,
+  survivalPlanFor,
+  SURVIVAL_LEVELS,
+} from "./survival";
+import { dayKeyFor, localDayKey } from "./time";
 import {
   isActive,
   isLive,
+  isTaskInPlan,
   type DayKey,
   type DayPlan,
   type DayRecord,
+  type HHMM,
   type Occurrence,
   type PlanSection,
   type Section,
@@ -107,6 +115,12 @@ export function anchorOf(row: { created_at: string }): DayKey {
   return Number.isNaN(created.getTime()) ? "1970-01-01" : localDayKey(created);
 }
 
+/** The app day a row was added on. Unlike `anchorOf`, this follows the reset time. */
+export function createdDayOf(row: { created_at: string }, resetAt: HHMM): DayKey {
+  const created = new Date(row.created_at);
+  return Number.isNaN(created.getTime()) ? "1970-01-01" : dayKeyFor(created, resetAt);
+}
+
 function matchesFilter(filter: TodayFilter, task: Task, minutes: number, longAt: number): boolean {
   switch (filter) {
     case "all":
@@ -183,7 +197,9 @@ export function planTasksFor(
     (occurrenceByTask.get(taskId)?.carried_from_day_key ?? null) !== null;
 
   return sectionsOfPlan(plan.id, input.planSections, input.sections).flatMap((section) => {
-    const sectionTasks = input.tasks.filter((t) => t.section_id === section.id && isActive(t));
+    const sectionTasks = input.tasks.filter(
+      (t) => t.section_id === section.id && isActive(t) && isTaskInPlan(t, plan.id),
+    );
     const sectionRecurs = recursOn(section.recurrence, input.dayKey, anchorOf(section));
     const scheduled = sectionTasks.filter(
       (t) =>
@@ -232,18 +248,24 @@ function taskCount(n: number): string {
   return `${n} ${n === 1 ? "task" : "tasks"}`;
 }
 
-/** Which plan a day uses: the picked non-survival plan (or primary), or the survival level's plan. */
+/**
+ * Which plan a day uses: the picked non-survival plan (or primary), or the survival level's plan.
+ * Pass `dayKey` for a past day, so "primary" means the plan that was primary then.
+ */
 export function resolveDayPlans(
   plans: readonly DayPlan[],
   dayRecord: DayRecord | null,
   settings: Settings,
+  dayKey?: DayKey,
 ): {
   basePlan: DayPlan | null;
   activePlan: DayPlan | null;
   survivalOn: boolean;
   level: SurvivalLevel;
 } {
-  const primary = primaryPlan(plans);
+  const primary = dayKey
+    ? primaryPlanOn(plans, dayKey, settings.primaryHistory)
+    : primaryPlan(plans);
   const picked = dayRecord?.plan_id
     ? plans.find((p) => p.id === dayRecord.plan_id && p.kind !== "survival" && isActive(p))
     : undefined;
@@ -260,6 +282,7 @@ export function buildToday(input: TodayInput): TodayView {
     input.plans,
     input.dayRecord,
     settings,
+    input.dayKey,
   );
 
   const grouped = activePlan ? planTasksFor(activePlan, input, survivalOn) : [];

@@ -28,6 +28,15 @@ export function combinePlans(
         if (!keepLinks.has(link.section_id)) await linkSection(ctx, fix.keep, link.section_id);
         await unlinkSection(ctx, fix.drop, link.section_id);
       }
+      // A task removed from the retired plan stays out of the plan that replaces it.
+      for (const task of await ctx.db.tasks.toArray()) {
+        if (!task.excluded_plan_ids.includes(fix.drop)) continue;
+        const kept = task.excluded_plan_ids.filter((id) => id !== fix.drop && id !== fix.keep);
+        await ctx.db.tasks.update(task.id, {
+          excluded_plan_ids: [...kept, fix.keep],
+          ...touch(ctx),
+        });
+      }
       await ctx.db.day_plans.update(fix.drop, {
         deleted_at: ctx.now().toISOString(),
         ...touch(ctx),

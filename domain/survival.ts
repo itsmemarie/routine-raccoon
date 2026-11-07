@@ -1,16 +1,19 @@
 import { compareRank } from "./rank";
+import { daysBetween } from "./time";
 import {
   isActive,
   isLive,
+  type DayKey,
   type DayPlan,
   type PlanSection,
   type Section,
+  type Settings,
   type SurvivalLevel,
 } from "./types";
 
 /**
  * Survival Mode plan rules.
- * @see docs/handoff/README.md "Survival copies" and "Today's plan picker"
+ * @see docs/handoff/README.md "Task copies" and "Today's plan picker"
  */
 
 export const SURVIVAL_LEVELS: readonly SurvivalLevel[] = [1, 2, 3];
@@ -24,6 +27,20 @@ export function survivalPlanFor(plans: readonly DayPlan[], level: SurvivalLevel)
 
 export function primaryPlan(plans: readonly DayPlan[]): DayPlan | null {
   return plans.find((p) => p.kind === "primary" && isLive(p)) ?? null;
+}
+
+/**
+ * The plan that was primary on `dayKey`: the first change after that day says what it was
+ * replacing. With no later change, or if that plan has been deleted, it's today's primary.
+ */
+export function primaryPlanOn(
+  plans: readonly DayPlan[],
+  dayKey: DayKey,
+  history: Settings["primaryHistory"],
+): DayPlan | null {
+  const change = history.find((entry) => daysBetween(dayKey, entry.until) > 0);
+  const earlier = change ? plans.find((p) => p.id === change.planId && isLive(p)) : undefined;
+  return earlier ?? primaryPlan(plans);
 }
 
 /** Sections of a plan in plan order (plan_sections.rank), excluding deleted/archived. */
@@ -46,8 +63,8 @@ export type CopyTarget =
   | { readonly kind: "create-section"; readonly name: string };
 
 /**
- * Where a task copied into a survival plan should land: the plan's section with the same name
- * as the source section; else the plan's first section; else a new section named after the source.
+ * Where a task copied into a Day Plan should land: the plan's section with the same name as the
+ * source section; else the plan's first section; else a new section named after the source.
  */
 export function resolveCopyTarget(
   sourceSectionName: string,

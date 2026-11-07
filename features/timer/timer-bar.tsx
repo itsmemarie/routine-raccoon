@@ -10,6 +10,8 @@ import { tickTask, untickTask } from "@/data/commands/day";
 import { markTimerAlerted } from "@/data/commands/timer";
 import { formatCountdown } from "@/domain/timer";
 import { useRun } from "@/features/common";
+import { playChime } from "@/lib/platform/chime";
+import { keepScreenOn } from "@/lib/platform/wake-lock";
 import { useTimer, useTimerControls } from "./use-timer";
 
 /** Routes where the bar would cover a form footer or a full-screen moment. */
@@ -22,8 +24,9 @@ function normalise(pathname: string): string {
 
 /**
  * Pinned timer bar (handoff "Timer"): counts down on every screen, survives navigation and
- * restarts because the end time is stored. On expiry it nudges once and offers to tick; it
- * never ticks by itself.
+ * restarts because the end time is stored. On expiry it nudges once (toast, quiet ping, vibration)
+ * and offers to tick; it never ticks by itself. The screen stays on while it counts down, or the
+ * phone would lock and freeze the app before the ping.
  */
 export function TimerBar() {
   const view = useTimer();
@@ -40,15 +43,26 @@ export function TimerBar() {
     if (!expired || alreadyAlerted || !startedAt || alertedFor.current === startedAt) return;
     alertedFor.current = startedAt;
     void run(markTimerAlerted(defaultContext()), { success: `Time's up: ${taskName}` });
+    void playChime();
     if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(200);
   }, [expired, alreadyAlerted, startedAt, taskName, run]);
 
+  const counting = view !== null && !expired;
+  useEffect(() => (counting ? keepScreenOn() : undefined), [counting]);
+
   const visible = view !== null && !HIDDEN_ON.some((r) => pathname.startsWith(r));
   useEffect(() => {
-    // Lets toasts sit above the bar instead of under it (see components/ui/toaster.tsx).
+    // The bar's top edge on task screens. Toasts and the sticky Save sit above it, not under it
+    // (components/ui/toaster.tsx, components/ui/save-bar.tsx).
     const root = document.documentElement;
-    if (visible) root.style.setProperty("--timer-bar-space", "72px");
-    else root.style.removeProperty("--timer-bar-space");
+    if (visible) {
+      root.style.setProperty(
+        "--timer-bar-space",
+        "calc(64px + max(14px, env(safe-area-inset-bottom)))",
+      );
+    } else {
+      root.style.removeProperty("--timer-bar-space");
+    }
     return () => {
       root.style.removeProperty("--timer-bar-space");
     };

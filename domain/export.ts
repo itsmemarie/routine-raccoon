@@ -1,14 +1,15 @@
 import { compareRank } from "./rank";
 import { recurrenceLabel } from "./recurrence";
-import type {
-  DayPlan,
-  DayRecord,
-  LogEntry,
-  Occurrence,
-  PlanSection,
-  Section,
-  Settings,
-  Task,
+import {
+  isTaskInPlan,
+  type DayPlan,
+  type DayRecord,
+  type LogEntry,
+  type Occurrence,
+  type PlanSection,
+  type Section,
+  type Settings,
+  type Task,
 } from "./types";
 
 /**
@@ -108,14 +109,11 @@ function csv(rows: readonly (readonly (string | number | boolean | null)[])[]): 
 /** Tasks in Day Plan → section → task order, one row per task. */
 export function buildTasksCsv(input: ExportInput): string {
   const rows = exportRows(input);
-  const planNamesBySection = new Map<string, string[]>();
+  const plansBySection = new Map<string, DayPlan[]>();
   for (const link of rows.planSections) {
     const plan = rows.plans.find((p) => p.id === link.plan_id);
     if (!plan) continue;
-    planNamesBySection.set(link.section_id, [
-      ...(planNamesBySection.get(link.section_id) ?? []),
-      plan.name,
-    ]);
+    plansBySection.set(link.section_id, [...(plansBySection.get(link.section_id) ?? []), plan]);
   }
   const sectionsById = new Map(rows.sections.map((s) => [s.id, s]));
   const header = [
@@ -135,7 +133,10 @@ export function buildTasksCsv(input: ExportInput): string {
     "Archived",
   ];
   const body = rows.tasks.map((task) => [
-    (planNamesBySection.get(task.section_id) ?? []).join("; "),
+    (plansBySection.get(task.section_id) ?? [])
+      .filter((plan) => isTaskInPlan(task, plan.id))
+      .map((plan) => plan.name)
+      .join("; "),
     sectionsById.get(task.section_id)?.name ?? "",
     task.name,
     task.emoji,

@@ -1,6 +1,7 @@
 import { bootstrapDatabase } from "@/data/bootstrap";
 import { compareRank } from "@/domain/rank";
 import { testContext } from "@/tests/db";
+import { tickTask, toggleStep } from "./day";
 import {
   archivePlan,
   createPlan,
@@ -13,19 +14,23 @@ import {
   setPlanDescription,
   setSurvivalMembership,
 } from "./plans";
+import { linkSection } from "./rows";
 import {
   archiveSection,
+  copySectionToPlan,
   createSection,
   deleteSection,
   duplicateSection,
-  linkSectionToPlan,
   moveSectionToPlan,
   removeSectionFromPlan,
   reorderSection,
   restoreSection,
+  separateSectionInPlan,
   updateSection,
   type SectionDraft,
 } from "./sections";
+import { currentDayKey } from "./shared";
+import { createTask, removeTaskFromPlan } from "./tasks";
 
 describe("section and Day Plan commands", () => {
   let t: ReturnType<typeof testContext>;
@@ -53,11 +58,46 @@ describe("section and Day Plan commands", () => {
 
   async function sectionIn(planName: string, name: string) {
     const plan = await planByName(planName);
-    const links = await t.db.plan_sections.where("plan_id").equals(plan.id).toArray();
+    const links = (await t.db.plan_sections.where("plan_id").equals(plan.id).toArray()).filter(
+      (l) => l.deleted_at === null,
+    );
     const sections = await t.db.sections.bulkGet(links.map((l) => l.section_id));
     const found = sections.find((s) => s?.name === name && s.deleted_at === null);
     if (!found) throw new Error(`no ${name}`);
     return found;
+  }
+
+  async function taskNames(sectionId: string) {
+    return (await t.db.tasks.where("section_id").equals(sectionId).toArray())
+      .filter((task) => task.deleted_at === null)
+      .sort(compareRank)
+      .map((task) => task.name);
+  }
+
+  async function addTask(
+    sectionId: string,
+    name: string,
+    steps: readonly { text: string }[] = [],
+  ): Promise<string> {
+    const result = await createTask(t.ctx, {
+      draft: {
+        name,
+        emoji: "",
+        minutes: 5,
+        hard: false,
+        sectionId,
+        steps: [...steps],
+        mantra: "",
+        notes: "",
+        videoUrl: "",
+        location: "",
+        recurrence: null,
+        neverShrink: false,
+        smaller: { minutes: null, text: "" },
+      },
+    });
+    if (!result.ok) throw result.error;
+    return result.value.taskId;
   }
 
   function sectionDraft(planIds: string[], overrides: Partial<SectionDraft> = {}): SectionDraft {
@@ -131,20 +171,200 @@ describe("section and Day Plan commands", () => {
       expect(await t.db.tasks.where("section_id").equals(copyId).count()).toBe(3);
     });
 
-    it("copy to Day Plan links the same section (edits show everywhere)", async () => {
+    it("copy to Day Plan makes an independent copy with its tasks", async () => {
+      const normal = await planByName("Normal");
       const travelling = await planByName("Travelling");
       const morning = await sectionIn("Normal", "Morning");
-      const first = await linkSectionToPlan(t.ctx, {
+      const result = await copySectionToPlan(t.ctx, {
         sectionId: morning.id,
+        fromPlanId: normal.id,
         planId: travelling.id,
       });
-      expect(first.ok && first.value.alreadyThere).toBe(false);
-      expect(await sectionNames(travelling.id)).toContain("Morning");
-      const again = await linkSectionToPlan(t.ctx, {
+      expect(result.ok && result.value.alreadyThere).toBe(false);
+      const copy = await sectionIn("Travelling", "Morning");
+      expect(copy.id).not.toBe(morning.id);
+      expect(await taskNames(copy.id)).toEqual(await taskNames(morning.id));
+      expect(await t.db.plan_sections.get([travelling.id, morning.id])).toBeUndefined();
+    });
+
+    it("copy to Day Plan leaves out tasks removed from the plan it copies from", async () => {
+      const normal = await planByName("Normal");
+      const travelling = await planByName("Travelling");
+      const morning = await sectionIn("Normal", "Morning");
+      await linkSection(t.ctx, travelling.id, morning.id);
+      const removed = await addTask(morning.id, "Pack a bag");
+      await removeTaskFromPlan(t.ctx, { taskId: removed, planId: normal.id });
+      const created = await createPlan(t.ctx, { name: "Weekend" });
+      const weekendId = created.ok ? created.value.planId : "";
+
+      await copySectionToPlan(t.ctx, {
         sectionId: morning.id,
+        fromPlanId: normal.id,
+        planId: weekendId,
+      });
+
+      const copy = await sectionIn("Weekend", "Morning");
+      expect(await taskNames(copy.id)).not.toContain("Pack a bag");
+      expect(await taskNames(morning.id)).toContain("Pack a bag");
+    });
+
+    it("a task added in one Day Plan stays there after a section copy", async () => {
+      const normal = await planByName("Normal");
+      const travelling = await planByName("Travelling");
+      const morning = await sectionIn("Normal", "Morning");
+      await copySectionToPlan(t.ctx, {
+        sectionId: morning.id,
+        fromPlanId: normal.id,
         planId: travelling.id,
       });
-      expect(again.ok && again.value.alreadyThere).toBe(true);
+      const copy = await sectionIn("Travelling", "Morning");
+
+      await addTask(copy.id, "Pack a bag");
+      await addTask(morning.id, "Water the plants");
+
+      expect(await taskNames(copy.id)).toContain("Pack a bag");
+      expect(await taskNames(morning.id)).not.toContain("Pack a bag");
+      expect(await taskNames(morning.id)).toContain("Water the plants");
+      expect(await taskNames(copy.id)).not.toContain("Water the plants");
+    });
+
+    it("copy to Day Plan adds nothing when the section is already shared with that plan", async () => {
+      const normal = await planByName("Normal");
+      const travelling = await planByName("Travelling");
+      const morning = await sectionIn("Normal", "Morning");
+      await linkSection(t.ctx, travelling.id, morning.id);
+      const before = await sectionNames(travelling.id);
+      const result = await copySectionToPlan(t.ctx, {
+        sectionId: morning.id,
+        fromPlanId: normal.id,
+        planId: travelling.id,
+      });
+      expect(result.ok && result.value.alreadyThere).toBe(true);
+      expect(await sectionNames(travelling.id)).toEqual(before);
+    });
+
+    describe("separate from other Day Plans", () => {
+      async function shareMorning() {
+        const normal = await planByName("Normal");
+        const travelling = await planByName("Travelling");
+        const morning = await sectionIn("Normal", "Morning");
+        await linkSection(t.ctx, travelling.id, morning.id);
+        return { normal, travelling, morning };
+      }
+
+      it("swaps in a copy at the same position and the other plan keeps the original", async () => {
+        const { normal, morning } = await shareMorning();
+        const order = await sectionNames(normal.id);
+
+        const result = await separateSectionInPlan(t.ctx, {
+          sectionId: morning.id,
+          planId: normal.id,
+        });
+
+        expect(result.ok).toBe(true);
+        expect(await sectionNames(normal.id)).toEqual(order);
+        const copy = await sectionIn("Normal", "Morning");
+        expect(copy.id).not.toBe(morning.id);
+        expect((await sectionIn("Travelling", "Morning")).id).toBe(morning.id);
+        expect(await taskNames(copy.id)).toEqual(await taskNames(morning.id));
+        const log = (await t.db.log_entries.toArray()).filter((e) => e.section_id === copy.id);
+        expect(log.map((entry) => entry.title)).toEqual(["Separated section Morning"]);
+      });
+
+      it("copies the section as this plan shows it", async () => {
+        const { normal, travelling, morning } = await shareMorning();
+        const removed = await addTask(morning.id, "Pack a bag");
+        await removeTaskFromPlan(t.ctx, { taskId: removed, planId: travelling.id });
+
+        await separateSectionInPlan(t.ctx, { sectionId: morning.id, planId: travelling.id });
+
+        const copy = await sectionIn("Travelling", "Morning");
+        expect(await taskNames(copy.id)).not.toContain("Pack a bag");
+        expect((await sectionIn("Normal", "Morning")).id).toBe(morning.id);
+        expect(await sectionNames(normal.id)).toContain("Morning");
+      });
+
+      it("stops new tasks reaching the other plan", async () => {
+        const { normal, morning } = await shareMorning();
+        await separateSectionInPlan(t.ctx, { sectionId: morning.id, planId: normal.id });
+        const copy = await sectionIn("Normal", "Morning");
+        await addTask(copy.id, "Pack a bag");
+        expect(await taskNames(copy.id)).toContain("Pack a bag");
+        expect(await taskNames(morning.id)).not.toContain("Pack a bag");
+      });
+
+      it("moves today's ticks to the copies when the plan is on Today, so nothing counts twice", async () => {
+        const { normal, morning } = await shareMorning();
+        const dayKey = await currentDayKey(t.ctx);
+        const taskId = await addTask(morning.id, "Pack a bag", [
+          { text: "Find it" },
+          { text: "Fill it" },
+        ]);
+        const stepId = (await t.db.tasks.get(taskId))?.steps[1]?.id ?? "";
+        await toggleStep(t.ctx, { taskId, dayKey, stepId, checked: true });
+        await tickTask(t.ctx, { taskId, dayKey });
+
+        await separateSectionInPlan(t.ctx, { sectionId: morning.id, planId: normal.id });
+
+        const copySection = await sectionIn("Normal", "Morning");
+        const tasks = await t.db.tasks.where("section_id").equals(copySection.id).toArray();
+        const copy = tasks.find((task) => task.name === "Pack a bag");
+        const moved = await t.db.task_occurrences
+          .where("[task_id+day_key]")
+          .equals([copy?.id ?? "", dayKey])
+          .first();
+        expect(moved?.status).toBe("done");
+        expect(moved?.minutes_credited).toBe(5);
+        expect(moved?.checked_step_ids).toEqual([copy?.steps[1]?.id]);
+        const original = await t.db.task_occurrences
+          .where("[task_id+day_key]")
+          .equals([taskId, dayKey])
+          .first();
+        expect(original?.deleted_at).not.toBeNull();
+      });
+
+      it("leaves today's ticks with the original when another plan is on Today", async () => {
+        const { travelling, morning } = await shareMorning();
+        const dayKey = await currentDayKey(t.ctx);
+        const taskId = await addTask(morning.id, "Pack a bag");
+        await tickTask(t.ctx, { taskId, dayKey });
+
+        await separateSectionInPlan(t.ctx, { sectionId: morning.id, planId: travelling.id });
+
+        const original = await t.db.task_occurrences
+          .where("[task_id+day_key]")
+          .equals([taskId, dayKey])
+          .first();
+        expect(original?.deleted_at).toBeNull();
+        const copySection = await sectionIn("Travelling", "Morning");
+        const copies = await t.db.tasks.where("section_id").equals(copySection.id).toArray();
+        const ticked = await t.db.task_occurrences
+          .where("task_id")
+          .anyOf(copies.map((task) => task.id))
+          .count();
+        expect(ticked).toBe(0);
+      });
+
+      it("does nothing for a section that is only in one plan", async () => {
+        const normal = await planByName("Normal");
+        const wind = await sectionIn("Normal", "Wind down");
+        const result = await separateSectionInPlan(t.ctx, {
+          sectionId: wind.id,
+          planId: normal.id,
+        });
+        expect(result.ok).toBe(true);
+        expect((await sectionIn("Normal", "Wind down")).id).toBe(wind.id);
+      });
+
+      it("fails with RR-DB-005 when the section isn't in that plan", async () => {
+        const travelling = await planByName("Travelling");
+        const morning = await sectionIn("Normal", "Morning");
+        const result = await separateSectionInPlan(t.ctx, {
+          sectionId: morning.id,
+          planId: travelling.id,
+        });
+        expect(result.ok ? null : result.error.code).toBe("RR-DB-005");
+      });
     });
 
     it("move to Day Plan leaves the old plan", async () => {
@@ -166,7 +386,7 @@ describe("section and Day Plan commands", () => {
       const morning = await sectionIn("Normal", "Morning");
       const last = await removeSectionFromPlan(t.ctx, { sectionId: morning.id, planId: normal.id });
       expect(last.ok ? null : last.error.code).toBe("RR-VAL-007");
-      await linkSectionToPlan(t.ctx, { sectionId: morning.id, planId: travelling.id });
+      await linkSection(t.ctx, travelling.id, morning.id);
       const ok = await removeSectionFromPlan(t.ctx, { sectionId: morning.id, planId: normal.id });
       expect(ok.ok).toBe(true);
       expect(await sectionNames(normal.id)).not.toContain("Morning");
@@ -291,7 +511,7 @@ describe("section and Day Plan commands", () => {
     it("delete keeps sections shared with other plans, deletes the rest", async () => {
       const travelling = await planByName("Travelling");
       const morning = await sectionIn("Normal", "Morning");
-      await linkSectionToPlan(t.ctx, { sectionId: morning.id, planId: travelling.id });
+      await linkSection(t.ctx, travelling.id, morning.id);
       const before = await sectionIn("Travelling", "Before leaving");
       await deletePlan(t.ctx, { planId: travelling.id });
       expect((await t.db.day_plans.get(travelling.id))?.deleted_at).not.toBeNull();

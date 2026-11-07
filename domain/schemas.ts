@@ -52,6 +52,8 @@ export const SettingsSchema = z.object({
   survivalName: z.string().min(1).max(40).catch("Survival Mode"),
   defaultLevel: SurvivalLevelSchema.catch(2),
   survivalCountsAsFullDay: z.boolean().catch(false),
+  /** Past primary plans, oldest first: `planId` was primary up to the day before `until`. */
+  primaryHistory: z.array(z.object({ planId: UuidSchema, until: DayKeySchema })).catch([]),
 });
 
 const synced = {
@@ -111,6 +113,8 @@ export const TaskSchema = z.object({
   location: z.string().max(120),
   steps: StepsSchema,
   smaller_versions: SmallerVersionSchema,
+  /** Day Plans this task was removed from while its section stays there. */
+  excluded_plan_ids: z.array(UuidSchema).default([]),
   archived_at: IsoDateTimeSchema.nullable(),
   ...synced,
 });

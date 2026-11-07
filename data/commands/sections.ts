@@ -1,4 +1,4 @@
-import type { LocalSection } from "@/data/db/schema";
+import type { LocalSection, LocalTask } from "@/data/db/schema";
 import {
   sectionAddedCopy,
   sectionArchivedCopy,
@@ -9,10 +9,14 @@ import {
   sectionMovedCopy,
   sectionRemovedFromPlanCopy,
   sectionRestoredCopy,
+  sectionSeparatedCopy,
 } from "@/domain/log";
 import { recurrenceLabel } from "@/domain/recurrence";
-import { primaryPlan } from "@/domain/survival";
-import type { Recurrence } from "@/domain/types";
+import { pickedPlanFromLog } from "@/domain/plan-picks";
+import { readKv, writeKv } from "@/data/db/kv";
+import { primaryPlan, primaryPlanOn } from "@/domain/survival";
+import { resolveDayPlans } from "@/domain/today";
+import { isLive, type DayKey, type Recurrence } from "@/domain/types";
 import { AppError } from "@/lib/errors/app-error";
 import type { Result } from "@/lib/errors/result";
 import type { CommandContext } from "./context";
@@ -29,11 +33,15 @@ import {
   indexAfter,
   linksOfPlan,
   linksOfSection,
+  nowIso,
   placeInOrder,
+  readSettings,
+  tasksInSection,
   requireName,
   requirePlan,
   requireSection,
   touch,
+  writeOccurrence,
 } from "./shared";
 import {
   clampText,
@@ -44,8 +52,9 @@ import {
 } from "./validate";
 
 /**
- * Section commands (TECH_SPEC §2.5 "Sections"). A section can sit in several Day Plans through
- * `plan_sections` (open decision Q1 → "link": edit once, it changes everywhere).
+ * Section commands (TECH_SPEC §2.5 "Sections"). Each Day Plan owns its sections, so a task added
+ * in one plan stays there. A section sits in several plans (`plan_sections`) only when the user
+ * asks for that with "Also in" on the section form (decision Q1).
  * @see docs/handoff/README.md "Sections", screens 5, 12–14
  */
 
@@ -171,7 +180,7 @@ export function duplicateSection(
         ctx.db.plan_sections.update([link.plan_id, link.section_id], { rank: next, ...touch(ctx) }),
     );
     await ctx.db.plan_sections.update([plan.id, copy.id], { rank, ...touch(ctx) });
-    await copySectionTasks(ctx, section.id, copy.id);
+    await copySectionTasks(ctx, section.id, copy.id, plan.id);
     await appendLog(ctx, sectionDuplicatedCopy(section.name, plan.name), {
       dayKey: await currentDayKey(ctx),
       sectionId: copy.id,
@@ -180,23 +189,143 @@ export function duplicateSection(
   });
 }
 
-/** "Copy to Day Plan": links the same section into another plan (Q1 = link). */
-export function linkSectionToPlan(
+/**
+ * "Copy to Day Plan": an independent copy of the section in `planId`, with its tasks as
+ * `fromPlanId` shows them.
+ */
+export function copySectionToPlan(
   ctx: CommandContext,
-  input: { sectionId: string; planId: string },
+  input: { sectionId: string; fromPlanId: string; planId: string },
 ): Promise<Result<{ planName: string; alreadyThere: boolean }, AppError>> {
-  return runCommand(ctx, "linkSectionToPlan", async () => {
+  return runCommand(ctx, "copySectionToPlan", async () => {
     const section = await requireSection(ctx, input.sectionId);
     const plan = await requirePlan(ctx, input.planId);
     const existing = await ctx.db.plan_sections.get([plan.id, section.id]);
     if (existing && existing.deleted_at === null)
       return { planName: plan.name, alreadyThere: true };
-    await linkSection(ctx, plan.id, section.id);
+    const copy = await insertSection(ctx, sectionContent(section), plan.id);
+    await copySectionTasks(ctx, section.id, copy.id, input.fromPlanId);
     await appendLog(ctx, sectionCopiedCopy(section.name, plan.name), {
       dayKey: await currentDayKey(ctx),
-      sectionId: section.id,
+      sectionId: copy.id,
     });
     return { planName: plan.name, alreadyThere: false };
+  });
+}
+
+/**
+ * Which Day Plan ran on a day, worked out the way Today and Progress work it out.
+ *
+ * A pick made on another device hasn't reached this one (`day_records.plan_id` is device-only for
+ * now), so those days would read as the primary plan and Separate would leave their history on the
+ * originals. The Log syncs and names every pick, so the missing plans are filled in from it first.
+ * That is what the device that made the pick already holds, and Progress then reads the same.
+ */
+async function planRunningOn(ctx: CommandContext): Promise<(dayKey: DayKey) => string | null> {
+  const [plans, records, settings, log] = await Promise.all([
+    ctx.db.day_plans.toArray(),
+    ctx.db.day_records.toArray(),
+    readSettings(ctx),
+    ctx.db.log_entries.where("kind").equals("survival").toArray(),
+  ]);
+  const byDay = new Map(records.filter(isLive).map((record) => [record.day_key, record]));
+  for (const record of byDay.values()) {
+    if (record.plan_id || record.survival_on) continue;
+    const picked = pickedPlanFromLog(
+      log,
+      plans,
+      record.day_key,
+      primaryPlanOn(plans, record.day_key, settings.primaryHistory),
+    );
+    if (!picked) continue;
+    // Local-only column: no `touch`, so nothing is queued to sync.
+    await ctx.db.day_records.update(record.day_key, { plan_id: picked.id });
+    byDay.set(record.day_key, { ...record, plan_id: picked.id });
+  }
+  return (dayKey) =>
+    resolveDayPlans(plans, byDay.get(dayKey) ?? null, settings, dayKey).activePlan?.id ?? null;
+}
+
+/**
+ * Hands the copies the history of every day `planId` ran: ticks, skips and carry-overs, step ticks
+ * included. Progress rebuilds a past day from the tasks its plan holds now, so history left on the
+ * originals would read as a day nothing happened. Days another plan ran stay with the originals.
+ */
+async function moveHistory(
+  ctx: CommandContext,
+  pairs: readonly { original: LocalTask; copy: LocalTask }[],
+  planId: string,
+): Promise<void> {
+  const planOn = await planRunningOn(ctx);
+  for (const { original, copy } of pairs) {
+    const stepIds = new Map(original.steps.map((step, i) => [step.id, copy.steps[i]?.id]));
+    const occurrences = await ctx.db.task_occurrences
+      .where("task_id")
+      .equals(original.id)
+      .toArray();
+    for (const occurrence of occurrences) {
+      if (occurrence.deleted_at !== null || planOn(occurrence.day_key) !== planId) continue;
+      await writeOccurrence(ctx, copy.id, occurrence.day_key, {
+        status: occurrence.status,
+        completed_at: occurrence.completed_at,
+        minutes_credited: occurrence.minutes_credited,
+        survival_level_at_completion: occurrence.survival_level_at_completion,
+        carried_from_day_key: occurrence.carried_from_day_key,
+        checked_step_ids: occurrence.checked_step_ids.flatMap((id) => stepIds.get(id) ?? []),
+      });
+      await ctx.db.task_occurrences.update(occurrence.id, {
+        deleted_at: nowIso(ctx),
+        ...touch(ctx),
+      });
+    }
+  }
+}
+
+/**
+ * "Separate from other Day Plans": swaps a shared section for an independent copy in `planId`, in
+ * the same position. The copies take over the days that plan ran and the other plans keep the
+ * days they ran, so Today and Progress read the same before and after and nothing counts twice.
+ */
+export function separateSectionInPlan(
+  ctx: CommandContext,
+  input: { sectionId: string; planId: string },
+): Promise<Result<void, AppError>> {
+  return runCommand(ctx, "separateSectionInPlan", async () => {
+    const section = await requireSection(ctx, input.sectionId);
+    const plan = await requirePlan(ctx, input.planId);
+    const links = await linksOfSection(ctx, section.id);
+    if (!links.some((l) => l.plan_id === plan.id)) {
+      throw new AppError("RR-DB-005", { context: { entity: "plan_section" } });
+    }
+    if (links.length < 2) return;
+    const copy = await insertSection(ctx, sectionContent(section), plan.id);
+    // insertSection appended the link and may have renumbered the others: read the slot now.
+    const slot = await ctx.db.plan_sections.get([plan.id, section.id]);
+    if (slot) {
+      await ctx.db.plan_sections.update([plan.id, copy.id], {
+        rank: slot.rank,
+        created_at: slot.created_at,
+        ...touch(ctx),
+      });
+    }
+    await unlinkSection(ctx, plan.id, section.id);
+    const pairs = await copySectionTasks(ctx, section.id, copy.id, plan.id);
+    // A copy is the same routine, so it keeps the original's dates, plan link included: recurrence
+    // counts from them, and Progress only counts an open task on days it and its link existed.
+    await ctx.db.sections.update(copy.id, { created_at: section.created_at });
+    for (const pair of pairs) {
+      await ctx.db.tasks.update(pair.copy.id, { created_at: pair.original.created_at });
+    }
+    await moveHistory(ctx, pairs, plan.id);
+    // A running timer follows its task to the copy this plan now shows, or "Tick it" would tick a
+    // row nothing displays.
+    const timer = await readKv(ctx.db, "timer");
+    const moved = pairs.find((pair) => pair.original.id === timer?.taskId);
+    if (timer && moved) await writeKv(ctx.db, "timer", { ...timer, taskId: moved.copy.id });
+    await appendLog(ctx, sectionSeparatedCopy(section.name, plan.name), {
+      dayKey: await currentDayKey(ctx),
+      sectionId: copy.id,
+    });
   });
 }
 
@@ -211,6 +340,17 @@ export function moveSectionToPlan(
     if (input.fromPlanId === target.id) return { planName: target.name };
     await linkSection(ctx, target.id, section.id);
     await unlinkSection(ctx, input.fromPlanId, section.id);
+    // A task removed from the plan the section leaves stays removed in the plan it joins.
+    for (const task of await tasksInSection(ctx, section.id)) {
+      if (!task.excluded_plan_ids.includes(input.fromPlanId)) continue;
+      await ctx.db.tasks.update(task.id, {
+        excluded_plan_ids: [
+          ...task.excluded_plan_ids.filter((id) => id !== input.fromPlanId && id !== target.id),
+          target.id,
+        ],
+        ...touch(ctx),
+      });
+    }
     await appendLog(ctx, sectionMovedCopy(section.name, target.name), {
       dayKey: await currentDayKey(ctx),
       sectionId: section.id,

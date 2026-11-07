@@ -6,8 +6,8 @@ import { ChoiceChip } from "@/components/ui/chip";
 import { GroupHeading } from "@/components/ui/layout";
 import { applyMove, SortableList } from "@/components/ui/sortable-list";
 import { SwitchRow } from "@/components/ui/toggle";
-import { defaultSmallerMinutes } from "@/domain/duration";
-import type { DayPlan, SurvivalLevel } from "@/domain/types";
+import { defaultSmallerMinutes, displayMinutes } from "@/domain/duration";
+import type { DayPlan, Section } from "@/domain/types";
 import { MINUTE_CHOICES, newStepKey, type StepDraft } from "./form-state";
 
 export const inputClass =
@@ -273,50 +273,121 @@ export function SmallerVersionField({
   );
 }
 
+function toggled(list: readonly string[], id: string): string[] {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+}
+
 /**
- * "Also add to {survivalName} plans" (handoff "Survival copies"): copies on save, one per plan.
+ * "Also add to" (handoff "Task copies"): the current plan's other sections and the other Day
+ * Plans, multi-select. Saving makes one independent copy per pick. `alreadyIn` names the plans
+ * left out because the task's section sits in them too, so a missing plan is never a mystery.
  */
-export function SurvivalCopyField({
+export function CopyToField({
+  planName,
+  sectionName,
+  sections,
   plans,
-  selected,
+  alreadyIn,
+  selectedSections,
+  selectedPlans,
   minutes,
+  smallerMinutes,
+  neverShrink,
   survivalName,
-  onChange,
+  onSections,
+  onPlans,
 }: {
+  planName: string;
+  sectionName: string;
+  sections: readonly Section[];
   plans: readonly DayPlan[];
-  selected: readonly SurvivalLevel[];
+  alreadyIn: readonly DayPlan[];
+  selectedSections: readonly string[];
+  selectedPlans: readonly string[];
   minutes: number;
+  smallerMinutes: number | null;
+  neverShrink: boolean;
   survivalName: string;
-  onChange: (next: SurvivalLevel[]) => void;
+  onSections: (next: string[]) => void;
+  onPlans: (next: string[]) => void;
 }) {
   const headingId = useId();
-  if (plans.length === 0) return null;
+  const sectionsId = useId();
+  const plansId = useId();
+  if (sections.length === 0 && plans.length === 0 && alreadyIn.length === 0) return null;
+
+  const allSections = sections.every((s) => selectedSections.includes(s.id));
+  const survivalPicked = plans.some(
+    (plan) => plan.kind === "survival" && selectedPlans.includes(plan.id),
+  );
+  const shownMinutes = displayMinutes(
+    {
+      minutes,
+      never_shrink: neverShrink,
+      smaller_versions: smallerMinutes === null ? {} : { minutes: smallerMinutes },
+    },
+    true,
+  );
   return (
     <section aria-labelledby={headingId} className="mt-5">
-      <GroupHeading id={headingId}>Also add to {survivalName} plans</GroupHeading>
-      <div role="group" aria-labelledby={headingId} className="mt-2.5 flex flex-wrap gap-[7px]">
-        {plans.map((plan) => {
-          const level = plan.survival_level;
-          if (level === null) return null;
-          const on = selected.includes(level);
-          return (
-            <ChoiceChip
-              key={plan.id}
-              selected={on}
-              onClick={() =>
-                onChange(on ? selected.filter((l) => l !== level) : [...selected, level])
-              }
-            >
-              {plan.name}
-            </ChoiceChip>
-          );
-        })}
-      </div>
-      <p className="mt-[9px] text-[11.5px] leading-normal text-text-muted">
-        {selected.length > 0
-          ? `A copy goes into each plan you pick, at about ${defaultSmallerMinutes(minutes)} min.`
-          : "Pick a plan to put a copy of this task in it. Copies are separate afterwards."}
-      </p>
+      <GroupHeading id={headingId}>Also add to</GroupHeading>
+      {sections.length > 0 ? (
+        <>
+          <p id={sectionsId} className="mt-2.5 text-[11.5px] font-semibold text-text-muted">
+            Other sections in {planName}
+          </p>
+          <div role="group" aria-labelledby={sectionsId} className="mt-2 flex flex-wrap gap-[7px]">
+            {sections.length > 1 ? (
+              <ChoiceChip
+                selected={allSections}
+                onClick={() => onSections(allSections ? [] : sections.map((s) => s.id))}
+              >
+                All sections
+              </ChoiceChip>
+            ) : null}
+            {sections.map((section) => (
+              <ChoiceChip
+                key={section.id}
+                dot={section.color}
+                selected={selectedSections.includes(section.id)}
+                onClick={() => onSections(toggled(selectedSections, section.id))}
+              >
+                {section.name}
+              </ChoiceChip>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {plans.length > 0 ? (
+        <>
+          <p id={plansId} className="mt-3 text-[11.5px] font-semibold text-text-muted">
+            Other Day Plans
+          </p>
+          <div role="group" aria-labelledby={plansId} className="mt-2 flex flex-wrap gap-[7px]">
+            {plans.map((plan) => (
+              <ChoiceChip
+                key={plan.id}
+                selected={selectedPlans.includes(plan.id)}
+                onClick={() => onPlans(toggled(selectedPlans, plan.id))}
+              >
+                {plan.name}
+              </ChoiceChip>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {alreadyIn.length > 0 ? (
+        <p className="mt-[9px] text-[11.5px] leading-normal text-text-muted">
+          {sectionName} is also in {alreadyIn.map((plan) => plan.name).join(", ")}, so this task
+          already shows there.
+        </p>
+      ) : null}
+      {sections.length > 0 || plans.length > 0 ? (
+        <p className="mt-[9px] text-[11.5px] leading-normal text-text-muted">
+          Each copy is its own task, so ticking one leaves the others alone.
+          {survivalPicked ? ` In ${survivalName} plans it shows at about ${shownMinutes} min.` : ""}
+        </p>
+      ) : null}
     </section>
   );
 }

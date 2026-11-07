@@ -100,8 +100,9 @@ export function taskAddedCopy(
   };
 }
 
-export function taskCopiedToSurvivalCopy(task: { name: string }, planName: string): LogCopy {
-  return { kind: "added", title: `Added ${task.name}`, meta: `Copy in ${planName}` };
+/** A copy made by the task form's "Also add to"; `place` is a section or a Day Plan. */
+export function taskCopyAddedCopy(task: { name: string }, place: string): LogCopy {
+  return { kind: "added", title: `Added ${task.name}`, meta: `Copy in ${place}` };
 }
 
 /** Edit: names the most telling change, e.g. "Estimated time 15 min → 30 min". */
@@ -109,8 +110,22 @@ export function taskEditedCopy(task: { name: string }, change: string): LogCopy 
   return { kind: "edited", title: `Edited ${task.name}`, meta: change };
 }
 
-export function taskDeletedCopy(task: { name: string }, sectionName: string): LogCopy {
-  return { kind: "edited", title: `Deleted ${task.name}`, meta: join(sectionName, "history kept") };
+/** `planCount` > 1: deleted from every plan it was in, copies included. */
+export function taskDeletedCopy(
+  task: { name: string },
+  sectionName: string,
+  planCount = 1,
+): LogCopy {
+  return {
+    kind: "edited",
+    title: `Deleted ${task.name}`,
+    meta: join(sectionName, planCount > 1 && `from ${planCount} plans`, "history kept"),
+  };
+}
+
+/** "Only from {plan}": it stays in the task's other plans. */
+export function taskRemovedFromPlanCopy(task: { name: string }, planName: string): LogCopy {
+  return { kind: "edited", title: `Removed ${task.name}`, meta: `From ${planName}` };
 }
 
 export function taskDuplicatedCopy(task: { name: string }, sectionName: string): LogCopy {
@@ -154,6 +169,10 @@ export function sectionDuplicatedCopy(name: string, planName: string): LogCopy {
 
 export function sectionCopiedCopy(name: string, planName: string): LogCopy {
   return { kind: "added", title: `Copied section ${name}`, meta: `To ${planName}` };
+}
+
+export function sectionSeparatedCopy(name: string, planName: string): LogCopy {
+  return { kind: "edited", title: `Separated section ${name}`, meta: `In ${planName}` };
 }
 
 export function sectionMovedCopy(name: string, planName: string): LogCopy {

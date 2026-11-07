@@ -141,7 +141,6 @@ describe("first sign-in on a phone", () => {
         neverShrink: false,
         smaller: { minutes: null, text: "" },
       },
-      copyToLevels: [],
     });
     const phoneTasks = await phone.db.tasks.count();
     const serverTasks = liveServer(server, "tasks").length;

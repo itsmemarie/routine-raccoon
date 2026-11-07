@@ -14,13 +14,49 @@ async function openToday(page: Page) {
 const headline = (page: Page) => page.getByRole("heading", { level: 1 });
 const toast = (page: Page) => page.getByTestId("toast");
 
+interface TimerAlerts {
+  notes: number;
+  held: number;
+}
+
+/** Counts notes played and screen locks held, before the app loads. */
+async function watchTimerAlerts(page: Page) {
+  await page.addInitScript(() => {
+    const alerts: TimerAlerts = { notes: 0, held: 0 };
+    Object.assign(window, { timerAlerts: alerts });
+    const createOscillator = BaseAudioContext.prototype.createOscillator;
+    BaseAudioContext.prototype.createOscillator = function (this: BaseAudioContext) {
+      alerts.notes += 1;
+      return createOscillator.call(this);
+    };
+    Object.defineProperty(navigator, "wakeLock", {
+      value: {
+        request: () => {
+          alerts.held += 1;
+          return Promise.resolve({
+            release: () => {
+              alerts.held -= 1;
+              return Promise.resolve();
+            },
+          });
+        },
+      },
+    });
+  });
+}
+
+const timerAlerts = (page: Page) =>
+  page.evaluate(() => (window as unknown as { timerAlerts: TimerAlerts }).timerAlerts);
+
 test.describe("tasks", () => {
   test("add a task to a section: it shows on Today and in the Log", async ({ page }) => {
     await openToday(page);
     await page.getByRole("link", { name: "Add task to Smash it" }).click();
     await expect(page.getByRole("heading", { name: "New task", level: 1 })).toBeVisible();
     await expect(
-      page.getByRole("group", { name: "Section" }).getByRole("button", { name: "Smash it" }),
+      page
+        .getByRole("group", { name: "Section", exact: true })
+        .getByRole("button", { name: "Smash it" }),
     ).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("textbox", { name: "Task name" }).fill("Call the bank");
     await page
@@ -317,5 +353,38 @@ test.describe("on the card", () => {
     await expect(bar).toBeHidden();
     await expect(toast(page)).toContainText("Ticked Drink a pint");
     await expect(headline(page)).toContainText("7 tasks left,");
+  });
+
+  test("timer: pings once at time's up, and holds the screen on only while counting", async ({
+    page,
+  }) => {
+    await watchTimerAlerts(page);
+    await openToday(page);
+    await page.getByRole("button", { name: "Start a 2 minute timer for Drink a pint" }).click();
+    const bar = page.getByTestId("timer-bar");
+    await expect(bar).toContainText("2:00");
+    await expect.poll(() => timerAlerts(page)).toEqual({ notes: 0, held: 1 });
+
+    await page.clock.setFixedTime(new Date(FIXED_NOW.getTime() + 3 * 60_000));
+    await expect(bar).toContainText("Time's up");
+    await expect.poll(() => timerAlerts(page)).toEqual({ notes: 2, held: 0 });
+
+    // The bar keeps ticking after expiry: it must not ping again.
+    await page.waitForTimeout(2_500);
+    expect(await timerAlerts(page)).toEqual({ notes: 2, held: 0 });
+  });
+
+  test("timer: stopped early, it stays silent and lets the screen sleep", async ({ page }) => {
+    await watchTimerAlerts(page);
+    await openToday(page);
+    await page.getByRole("button", { name: "Start a 2 minute timer for Drink a pint" }).click();
+    const bar = page.getByTestId("timer-bar");
+    await expect.poll(() => timerAlerts(page)).toEqual({ notes: 0, held: 1 });
+
+    await bar.getByRole("button", { name: "Stop timer for Drink a pint" }).click();
+    await expect(bar).toBeHidden();
+    await page.clock.setFixedTime(new Date(FIXED_NOW.getTime() + 3 * 60_000));
+    await page.waitForTimeout(1_500);
+    expect(await timerAlerts(page)).toEqual({ notes: 0, held: 0 });
   });
 });

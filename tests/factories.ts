@@ -79,6 +79,7 @@ export function task(overrides: Partial<Task> & Pick<Task, "section_id">): Task 
     location: "",
     steps: [],
     smaller_versions: {},
+    excluded_plan_ids: [],
     archived_at: null,
     ...synced,
     ...overrides,

@@ -6,7 +6,7 @@ import { ChoiceChip } from "@/components/ui/chip";
 import { GroupHeading } from "@/components/ui/layout";
 import { Sheet } from "@/components/ui/sheet";
 import { defaultContext } from "@/data/commands/context";
-import { linkSectionToPlan, moveSectionToPlan } from "@/data/commands/sections";
+import { copySectionToPlan, moveSectionToPlan } from "@/data/commands/sections";
 import { copyTaskToPlan, moveTask } from "@/data/commands/tasks";
 import { useOrganisation } from "@/data/hooks/use-organisation";
 import { activePlans, allSectionChoices, plansOfSection } from "@/domain/organise";
@@ -15,9 +15,8 @@ import { useRun } from "./use-run";
 
 export type CopyMoveTarget =
   | { readonly kind: "task"; readonly taskId: string; readonly sectionId: string }
-  | { readonly kind: "section-copy"; readonly sectionId: string; readonly name: string }
   | {
-      readonly kind: "section-move";
+      readonly kind: "section-copy" | "section-move";
       readonly sectionId: string;
       readonly name: string;
       readonly fromPlanId: string;
@@ -26,7 +25,7 @@ export type CopyMoveTarget =
 /**
  * Copy / move sheet (handoff screen 8, "Copy / move sheet").
  * - Task: Day Plans chips copy it into that plan's first section; section chips move it.
- * - Section copy: links the same section into another plan (decision Q1: link).
+ * - Section copy: an independent copy, with its tasks, in another plan (decision Q1).
  * - Section move: leaves its current plan for another one.
  */
 export function CopyMoveSheet({
@@ -56,7 +55,7 @@ export function CopyMoveSheet({
         ? {
             title: "Copy this section",
             description:
-              "It becomes the same section in both Day Plans, so an edit shows in each. Use Duplicate for a separate copy.",
+              "That Day Plan gets its own copy, with these tasks. Changes in one plan won't reach the other.",
             plans: plans.filter((p) => !linked.has(p.id)),
           }
         : {
@@ -74,12 +73,19 @@ export function CopyMoveSheet({
       });
       if (result.ok) onClose();
     } else if (target.kind === "section-copy") {
-      const result = await run(linkSectionToPlan(ctx, { sectionId: target.sectionId, planId }), {
-        success: (v) =>
-          v.alreadyThere
-            ? `${target.name} is already in ${v.planName}`
-            : `${target.name} copied to ${v.planName}`,
-      });
+      const result = await run(
+        copySectionToPlan(ctx, {
+          sectionId: target.sectionId,
+          fromPlanId: target.fromPlanId,
+          planId,
+        }),
+        {
+          success: (v) =>
+            v.alreadyThere
+              ? `${target.name} is already in ${v.planName}`
+              : `${target.name} copied to ${v.planName}`,
+        },
+      );
       if (result.ok) onClose();
     } else {
       const result = await run(

@@ -9,6 +9,7 @@ import { InlineText } from "./inline-text";
 import { Card, ContextCard, Dot, EmptyBox, GroupHeading, Overline } from "./layout";
 import { MenuButton } from "./menu";
 import { canGoBack, NavigationTracker, resetNavigationStack, useBack } from "./navigation";
+import { SaveBar } from "./save-bar";
 import { BackBar, FormBar, ScreenHeader, ScreenRoot } from "./screen";
 import { SettingsGroup, SettingsRow } from "./settings-row";
 import { Dialog, Sheet } from "./sheet";
@@ -282,6 +283,179 @@ describe("InlineText", () => {
     await userEvent.tab();
     expect(onCommit).toHaveBeenCalledWith("a\nb");
   });
+
+  it("reports a change only while the draft differs from the stored value", async () => {
+    const onDirtyChange = vi.fn();
+    render(
+      <InlineText value="Pint" label="Name" onCommit={vi.fn()} onDirtyChange={onDirtyChange} />,
+    );
+    const input = screen.getByLabelText("Name");
+
+    await userEvent.click(input);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    await userEvent.type(input, "s");
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    await userEvent.keyboard("{Backspace}");
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+    await userEvent.type(input, "s");
+    await userEvent.tab();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+    await userEvent.click(input);
+    await userEvent.type(input, "!");
+    await userEvent.keyboard("{Escape}");
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  describe("linkify", () => {
+    const note = "Book at https://example.com/book today";
+    const field = () => screen.queryByRole("textbox", { name: "Notes" });
+
+    it("shows addresses as safe links, and opening one leaves the note alone", async () => {
+      render(<InlineText value={note} label="Notes" multiline linkify onCommit={vi.fn()} />);
+      expect(field()).not.toBeInTheDocument();
+
+      const link = screen.getByRole("link", { name: "https://example.com/book" });
+      expect(link).toHaveAttribute("href", "https://example.com/book");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+
+      link.addEventListener("click", (event) => event.preventDefault()); // jsdom can't navigate.
+      await userEvent.click(link);
+      expect(field()).not.toBeInTheDocument();
+    });
+
+    it("one tap on the plain text starts editing, and leaving shows the link again", async () => {
+      const onCommit = vi.fn();
+      render(<InlineText value={note} label="Notes" multiline linkify onCommit={onCommit} />);
+
+      await userEvent.click(screen.getByText(/today/, { selector: "p" }));
+      expect(field()).toHaveFocus();
+      expect(field()).toHaveValue(note);
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+
+      await userEvent.tab();
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(screen.getByRole("link")).toBeInTheDocument();
+    });
+
+    it("a note that is only a link can still be edited, by keyboard too", async () => {
+      const onCommit = vi.fn();
+      const view = render(
+        <InlineText value="www.example.com" label="Notes" multiline linkify onCommit={onCommit} />,
+      );
+
+      await userEvent.tab(); // The link.
+      await userEvent.tab(); // The button.
+      expect(screen.getByRole("button", { name: "Edit notes" })).toHaveFocus();
+      await userEvent.keyboard("{Enter}");
+      expect(field()).toHaveFocus();
+
+      await userEvent.type(field() as HTMLElement, " and www.example.org");
+      await userEvent.tab();
+      const next = "www.example.com and www.example.org";
+      expect(onCommit).toHaveBeenCalledWith(next);
+
+      view.rerender(
+        <InlineText value={next} label="Notes" multiline linkify onCommit={onCommit} />,
+      );
+      expect(screen.getAllByRole("link")).toHaveLength(2);
+    });
+
+    it("Escape drops the edit and goes back to the link", async () => {
+      const onCommit = vi.fn();
+      render(<InlineText value={note} label="Notes" multiline linkify onCommit={onCommit} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Edit notes" }));
+      await userEvent.type(field() as HTMLElement, " oops");
+      await userEvent.keyboard("{Escape}");
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(screen.getByRole("link")).toBeInTheDocument();
+    });
+
+    it("stays a plain field with no address, and a sync can't take it away mid-edit", async () => {
+      const onCommit = vi.fn();
+      const view = render(
+        <InlineText value="Plain" label="Notes" multiline linkify onCommit={onCommit} />,
+      );
+      expect(screen.queryByRole("button", { name: "Edit notes" })).not.toBeInTheDocument();
+
+      const box = field() as HTMLElement;
+      await userEvent.type(box, " note");
+      view.rerender(
+        <InlineText value={note} label="Notes" multiline linkify onCommit={onCommit} />,
+      );
+      expect(box).toHaveFocus();
+      expect(box).toHaveValue("Plain note");
+    });
+
+    it("only applies when asked for", () => {
+      render(<InlineText value={note} label="Notes" multiline onCommit={vi.fn()} />);
+      expect(field()).toHaveValue(note);
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("SaveBar", () => {
+  const bottom = () => screen.getByTestId("save-bar").getAttribute("style");
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("saves without taking focus from the field, so the tap can't commit and lose the bar", async () => {
+    const onSave = vi.fn();
+    render(
+      <>
+        <input aria-label="Notes" />
+        <SaveBar onSave={onSave} />
+      </>,
+    );
+    const field = screen.getByLabelText("Notes");
+    await userEvent.click(field);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(field).toHaveFocus();
+  });
+
+  it("can't save twice while busy", async () => {
+    const onSave = vi.fn();
+    render(<SaveBar onSave={onSave} busy />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("stays at the bottom where the browser has no visual viewport", () => {
+    vi.stubGlobal("visualViewport", undefined);
+    render(<SaveBar onSave={vi.fn()} />);
+    expect(bottom()).toContain("var(--timer-bar-space, 0px), 0px");
+  });
+
+  it("follows the keyboard as it opens, and stops listening when it leaves", () => {
+    const listeners: Record<string, () => void> = {};
+    const viewport = {
+      height: window.innerHeight,
+      offsetTop: 0,
+      addEventListener: (type: string, listener: () => void) => {
+        listeners[type] = listener;
+      },
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("visualViewport", viewport);
+    const { unmount } = render(<SaveBar onSave={vi.fn()} />);
+    expect(bottom()).toContain("var(--timer-bar-space, 0px), 0px");
+
+    viewport.height = window.innerHeight - 340;
+    viewport.offsetTop = 40;
+    act(() => listeners.resize?.());
+    expect(bottom()).toContain("var(--timer-bar-space, 0px), 300px");
+
+    unmount();
+    expect(viewport.removeEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(viewport.removeEventListener).toHaveBeenCalledWith("scroll", expect.any(Function));
+  });
 });
 
 describe("layout pieces", () => {
@@ -396,6 +570,11 @@ describe("screens and navigation", () => {
     expect(onSave).toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: /Settings/ }));
     expect(router.replace).toHaveBeenCalledWith("/settings/");
+  });
+
+  it("FormBar hides Save while a SaveBar offers it, keeping its space", () => {
+    render(<FormBar title="Edit task" onCancel={vi.fn()} onSave={vi.fn()} hideSave />);
+    expect(screen.getByText("Save")).toHaveClass("invisible");
   });
 });
 

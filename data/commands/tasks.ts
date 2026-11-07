@@ -6,24 +6,30 @@ import {
   movedViaSheetCopy,
   taskAddedCopy,
   taskCopiedCopy,
-  taskCopiedToSurvivalCopy,
+  taskCopyAddedCopy,
   taskDeletedCopy,
   taskDuplicatedCopy,
   taskEditedCopy,
+  taskRemovedFromPlanCopy,
 } from "@/domain/log";
+import { exclusionsAfterMove, plansOfTask, taskPlacement } from "@/domain/organise";
 import { importLogMeta, type PastedTaskDraft } from "@/domain/paste-parser";
 import { compareRank } from "@/domain/rank";
-import { resolveCopyTarget, survivalPlanFor } from "@/domain/survival";
-import type { SurvivalLevel } from "@/domain/types";
+import { resolveCopyTarget, sectionsOfPlan } from "@/domain/survival";
+import { isActive, isTaskInPlan } from "@/domain/types";
+import { deleteKv, readKv } from "@/data/db/kv";
 import { AppError } from "@/lib/errors/app-error";
 import type { Result } from "@/lib/errors/result";
 import type { CommandContext } from "./context";
-import { insertSection, insertTask, sectionContent, taskContent } from "./rows";
+import { insertSection, insertTask, otherPlansSharing, sectionContent, taskContent } from "./rows";
 import { appendLog, runCommand } from "./run-command";
 import {
   currentDayKey,
   indexAfter,
+  linksOfSection,
+  nowIso,
   placeInOrder,
+  readOrganisation,
   requireName,
   requirePlan,
   requireSection,
@@ -44,33 +50,69 @@ import {
 
 /**
  * Task commands (TECH_SPEC §2.5 "Tasks").
- * @see docs/handoff/README.md "Survival copies", "Paste a list", "Drag and drop", screens 6–11
+ * @see docs/handoff/README.md "Task copies", "Paste a list", "Drag and drop", screens 6–11
  */
 
 /** Default first line of a new task's mantra (PRD R5). */
 export const DEFAULT_MANTRA =
   "Done is better than perfect. I can feel embarrassed and still do this.";
 
+/** Where "Also add to" puts copies: sections of the current plan and other Day Plans. */
+export interface CopyTargets {
+  readonly sectionIds: readonly string[];
+  readonly planIds: readonly string[];
+}
+
+const NO_COPIES: CopyTargets = { sectionIds: [], planIds: [] };
+
 /**
- * "Also add to {survivalName} plans": copies the task into each picked survival plan, into
- * the section with the same name, else the plan's first section, else a new section named
- * after the source. The copies are independent afterwards. Returns the plan names copied to.
+ * "Also add to": one independent copy per picked section and per picked Day Plan. In a plan the
+ * copy goes to the section with the same name, else the plan's first section, else a new
+ * section named after the source.
+ *
+ * A place already showing the task gets no second copy, which is why a plan holding a filled
+ * section is skipped: sections can sit in several plans. A pick that no longer exists is
+ * skipped too: sync may remove it while the form is open, its chip goes with it, and failing
+ * here would leave the user unable to save. Picking a plan the task was removed from brings the
+ * task itself back, no copy needed. Returns the names of the places it was added to.
  */
-async function copyIntoSurvivalPlans(
+async function copyTask(
   ctx: CommandContext,
   source: LocalTask,
-  levels: readonly SurvivalLevel[],
   dayKey: string,
+  { sectionIds, planIds }: CopyTargets = NO_COPIES,
 ): Promise<string[]> {
-  if (levels.length === 0) return [];
+  if (sectionIds.length === 0 && planIds.length === 0) return [];
   const plans = await ctx.db.day_plans.toArray();
   const planSections = await ctx.db.plan_sections.toArray();
   const sections = await ctx.db.sections.toArray();
   const sourceSection = await requireSection(ctx, source.section_id);
+  const filled = new Set([source.section_id]);
   const copiedTo: string[] = [];
-  for (const level of [...new Set(levels)].sort()) {
-    const plan = survivalPlanFor(plans, level);
-    if (!plan) continue;
+
+  for (const sectionId of new Set(sectionIds)) {
+    const section = sections.find((s) => s.id === sectionId && isActive(s));
+    if (!section || filled.has(section.id)) continue;
+    const copy = await insertTask(ctx, section.id, taskContent(source), { freshStepIds: true });
+    await appendLog(ctx, taskCopyAddedCopy(copy, section.name), {
+      dayKey,
+      taskId: copy.id,
+      sectionId: section.id,
+    });
+    filled.add(section.id);
+    copiedTo.push(section.name);
+  }
+
+  const picked = new Set(planIds);
+  const broughtBack = new Set<string>();
+  for (const plan of plans.filter((p) => picked.has(p.id) && isActive(p)).sort(compareRank)) {
+    const inPlan = sectionsOfPlan(plan.id, planSections, sections);
+    if (!isTaskInPlan(source, plan.id) && inPlan.some((s) => s.id === source.section_id)) {
+      broughtBack.add(plan.id);
+      copiedTo.push(plan.name);
+      continue;
+    }
+    if (inPlan.some((s) => filled.has(s.id))) continue;
     const target = resolveCopyTarget(sourceSection.name, plan.id, planSections, sections);
     const sectionId =
       target.kind === "create-section"
@@ -79,22 +121,32 @@ async function copyIntoSurvivalPlans(
     const copy = await insertTask(
       ctx,
       sectionId,
-      { ...taskContent(source), survival_level: level },
-      { freshStepIds: true },
+      {
+        ...taskContent(source),
+        survival_level: plan.kind === "survival" ? plan.survival_level : null,
+      },
+      { freshStepIds: true, excludedPlanIds: await otherPlansSharing(ctx, sectionId, plan.id) },
     );
-    await appendLog(ctx, taskCopiedToSurvivalCopy(copy, plan.name), {
+    await appendLog(ctx, taskCopyAddedCopy(copy, plan.name), {
       dayKey,
       taskId: copy.id,
       sectionId,
     });
+    filled.add(sectionId);
     copiedTo.push(plan.name);
+  }
+  if (broughtBack.size > 0) {
+    await ctx.db.tasks.update(source.id, {
+      excluded_plan_ids: source.excluded_plan_ids.filter((id) => !broughtBack.has(id)),
+      ...touch(ctx),
+    });
   }
   return copiedTo;
 }
 
 export function createTask(
   ctx: CommandContext,
-  input: { draft: TaskDraft; copyToLevels: readonly SurvivalLevel[] },
+  input: { draft: TaskDraft; copyTo?: CopyTargets },
 ): Promise<Result<{ taskId: string; sectionName: string; copiedTo: string[] }, AppError>> {
   return runCommand(ctx, "createTask", async () => {
     const section = await requireSection(ctx, input.draft.sectionId);
@@ -106,7 +158,7 @@ export function createTask(
       taskId: task.id,
       sectionId: section.id,
     });
-    const copiedTo = await copyIntoSurvivalPlans(ctx, task, input.copyToLevels, dayKey);
+    const copiedTo = await copyTask(ctx, task, dayKey, input.copyTo);
     return { taskId: task.id, sectionName: section.name, copiedTo };
   });
 }
@@ -135,10 +187,19 @@ function changedLabels(before: LocalTask, after: Partial<LocalTask>): string[] {
   return [...labels];
 }
 
+/** What `excluded_plan_ids` becomes when `task` moves to `sectionId`. */
+async function exclusionsIn(ctx: CommandContext, task: LocalTask, sectionId: string) {
+  const links = await linksOfSection(ctx, sectionId);
+  return exclusionsAfterMove(
+    task.excluded_plan_ids,
+    links.map((l) => l.plan_id),
+  );
+}
+
 /** Saves the task form. Moving to another section appends it there. */
 export function updateTask(
   ctx: CommandContext,
-  input: { taskId: string; draft: TaskDraft; copyToLevels: readonly SurvivalLevel[] },
+  input: { taskId: string; draft: TaskDraft; copyTo?: CopyTargets },
 ): Promise<Result<{ copiedTo: string[] }, AppError>> {
   return runCommand(ctx, "updateTask", async () => {
     const before = await requireTask(ctx, input.taskId);
@@ -148,6 +209,7 @@ export function updateTask(
     if (section.id !== before.section_id) {
       const siblings = await tasksInSection(ctx, section.id);
       patch.section_id = section.id;
+      patch.excluded_plan_ids = await exclusionsIn(ctx, before, section.id);
       patch.rank = await placeInOrder(ctx, siblings, siblings.length, (sibling, next) =>
         ctx.db.tasks.update(sibling.id, { rank: next, ...touch(ctx) }),
       );
@@ -160,7 +222,7 @@ export function updateTask(
       taskEditedCopy(after, describeTaskChange(before, after, changedLabels(before, patch))),
       { dayKey, taskId: before.id, sectionId: section.id },
     );
-    const copiedTo = await copyIntoSurvivalPlans(ctx, after, input.copyToLevels, dayKey);
+    const copiedTo = await copyTask(ctx, after, dayKey, input.copyTo);
     return { copiedTo };
   });
 }
@@ -200,15 +262,64 @@ export function patchTask(
   });
 }
 
-/** Removes the task for good (soft delete: the tombstone syncs; history stays in the Log). */
+/** A timer running on a task that has just been deleted would only offer a "Tick it" that fails. */
+async function stopTimerFor(ctx: CommandContext, taskIds: readonly string[]): Promise<void> {
+  const timer = await readKv(ctx.db, "timer");
+  if (timer && taskIds.includes(timer.taskId)) await deleteKv(ctx.db, "timer");
+}
+
+/**
+ * Removes the task for good from every plan it is in: its row, so every plan sharing its section
+ * loses it, and its separate copies in other plans (see `copiesOfTask`). Soft delete: the
+ * tombstones sync and the history stays in the Log.
+ */
 export function deleteTask(
   ctx: CommandContext,
   input: { taskId: string },
 ): Promise<Result<void, AppError>> {
   return runCommand(ctx, "deleteTask", async () => {
     const task = await requireTask(ctx, input.taskId);
-    await ctx.db.tasks.update(task.id, { deleted_at: ctx.now().toISOString(), ...touch(ctx) });
-    await appendLog(ctx, taskDeletedCopy(task, await sectionNameOf(ctx, task.section_id)), {
+    const { plans, copies } = taskPlacement(await readOrganisation(ctx), task, null);
+    for (const row of [task, ...copies]) {
+      await ctx.db.tasks.update(row.id, { deleted_at: nowIso(ctx), ...touch(ctx) });
+    }
+    await stopTimerFor(
+      ctx,
+      [task, ...copies].map((row) => row.id),
+    );
+    await appendLog(
+      ctx,
+      taskDeletedCopy(task, await sectionNameOf(ctx, task.section_id), plans.length),
+      { dayKey: await currentDayKey(ctx), taskId: task.id, sectionId: task.section_id },
+    );
+  });
+}
+
+/**
+ * "Only from {plan}": takes the task out of one Day Plan and leaves it in the others. Its section
+ * stays shared. When this plan was the last one showing the row, the row itself is deleted;
+ * copies in other plans are separate rows and stay either way.
+ * @see docs/handoff/README.md "Deleting a task that's in several plans"
+ */
+export function removeTaskFromPlan(
+  ctx: CommandContext,
+  input: { taskId: string; planId: string },
+): Promise<Result<void, AppError>> {
+  return runCommand(ctx, "removeTaskFromPlan", async () => {
+    const task = await requireTask(ctx, input.taskId);
+    const plan = await requirePlan(ctx, input.planId);
+    const plans = plansOfTask(await readOrganisation(ctx), task);
+    if (!plans.some((p) => p.id === plan.id)) {
+      throw new AppError("RR-DB-005", { context: { entity: "task_in_plan", id: task.id } });
+    }
+    await ctx.db.tasks.update(task.id, {
+      ...(plans.length > 1
+        ? { excluded_plan_ids: [...task.excluded_plan_ids, plan.id] }
+        : { deleted_at: nowIso(ctx) }),
+      ...touch(ctx),
+    });
+    if (plans.length <= 1) await stopTimerFor(ctx, [task.id]);
+    await appendLog(ctx, taskRemovedFromPlanCopy(task, plan.name), {
       dayKey: await currentDayKey(ctx),
       taskId: task.id,
       sectionId: task.section_id,
@@ -229,7 +340,11 @@ export function duplicateTask(
       ctx,
       task.section_id,
       { ...taskContent(task), name },
-      { index: indexAfter(siblings, task.id), freshStepIds: true },
+      {
+        index: indexAfter(siblings, task.id),
+        freshStepIds: true,
+        excludedPlanIds: task.excluded_plan_ids,
+      },
     );
     await appendLog(ctx, taskDuplicatedCopy(task, await sectionNameOf(ctx, task.section_id)), {
       dayKey: await currentDayKey(ctx),
@@ -253,7 +368,10 @@ export function copyTaskToPlan(
     const plan = await requirePlan(ctx, input.planId);
     const [first] = await sectionsInPlan(ctx, plan.id);
     if (!first) throw new AppError("RR-VAL-006", { params: { plan: plan.name } });
-    const copy = await insertTask(ctx, first.id, taskContent(task), { freshStepIds: true });
+    const copy = await insertTask(ctx, first.id, taskContent(task), {
+      freshStepIds: true,
+      excludedPlanIds: await otherPlansSharing(ctx, first.id, plan.id),
+    });
     await appendLog(ctx, taskCopiedCopy(task, plan.name, first.name), {
       dayKey: await currentDayKey(ctx),
       taskId: copy.id,
@@ -291,7 +409,12 @@ export function moveTask(
     const rank = await placeInOrder(ctx, siblings, index, (sibling, next) =>
       ctx.db.tasks.update(sibling.id, { rank: next, ...touch(ctx) }),
     );
-    await ctx.db.tasks.update(task.id, { section_id: target.id, rank, ...touch(ctx) });
+    await ctx.db.tasks.update(task.id, {
+      section_id: target.id,
+      rank,
+      ...(changesSection ? { excluded_plan_ids: await exclusionsIn(ctx, task, target.id) } : {}),
+      ...touch(ctx),
+    });
     if (changesSection) {
       const from = await sectionNameOf(ctx, task.section_id);
       await appendLog(

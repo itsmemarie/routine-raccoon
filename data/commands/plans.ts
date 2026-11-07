@@ -12,7 +12,7 @@ import {
 } from "@/domain/log";
 import { compareRank } from "@/domain/rank";
 import { canDemotePlan, SURVIVAL_LEVELS } from "@/domain/survival";
-import type { SurvivalLevel } from "@/domain/types";
+import type { DayKey, SurvivalLevel } from "@/domain/types";
 import { AppError } from "@/lib/errors/app-error";
 import type { Result } from "@/lib/errors/result";
 import type { CommandContext } from "./context";
@@ -100,6 +100,26 @@ export function setPlanDescription(
   });
 }
 
+/**
+ * Remembers the plan that was primary up to `dayKey`, so past days stay judged against it. A
+ * second change on the same day adds nothing: the earlier entry already covers the days before.
+ */
+async function recordPrimaryChange(
+  ctx: CommandContext,
+  planId: string,
+  dayKey: DayKey,
+): Promise<void> {
+  const settings = await readSettings(ctx);
+  if (settings.primaryHistory.some((entry) => entry.until === dayKey)) return;
+  await ctx.db.user_settings.update("me", {
+    settings: {
+      ...settings,
+      primaryHistory: [...settings.primaryHistory, { planId, until: dayKey }],
+    },
+    ...touch(ctx),
+  });
+}
+
 /** Makes a regular plan the primary one; the old primary becomes a regular plan. */
 export function makePrimary(
   ctx: CommandContext,
@@ -111,13 +131,15 @@ export function makePrimary(
     if (plan.kind === "survival" || plan.archived_at !== null) {
       throw new AppError("RR-VAL-008", { context: { kind: plan.kind } });
     }
+    const dayKey = await currentDayKey(ctx);
     for (const other of await liveOrderedPlans(ctx)) {
       if (other.kind === "primary") {
         await ctx.db.day_plans.update(other.id, { kind: "custom", ...touch(ctx) });
+        await recordPrimaryChange(ctx, other.id, dayKey);
       }
     }
     await ctx.db.day_plans.update(plan.id, { kind: "primary", ...touch(ctx) });
-    await appendLog(ctx, planPrimaryCopy(plan.name), { dayKey: await currentDayKey(ctx) });
+    await appendLog(ctx, planPrimaryCopy(plan.name), { dayKey });
   });
 }
 
@@ -193,7 +215,7 @@ export function duplicatePlan(
       const section = await ctx.db.sections.get(link.section_id);
       if (!section || section.deleted_at !== null || section.archived_at !== null) continue;
       const sectionCopy = await insertSection(ctx, sectionContent(section), copy.id);
-      await copySectionTasks(ctx, section.id, sectionCopy.id);
+      await copySectionTasks(ctx, section.id, sectionCopy.id, plan.id);
     }
     await appendLog(ctx, planDuplicatedCopy(plan.name), { dayKey: await currentDayKey(ctx) });
     return { planId: copy.id };

@@ -104,19 +104,24 @@ export function BackBar({
   );
 }
 
-/** Form bar: Cancel · title · Save (handoff screens 10, 12). */
+/**
+ * Form bar: Cancel · title · Save (handoff screens 10, 12). `hideSave` is for while a SaveBar
+ * offers the same action; the space stays, so the title doesn't jump.
+ */
 export function FormBar({
   title,
   onCancel,
   onSave,
   saveLabel = "Save",
   busy = false,
+  hideSave = false,
 }: {
   title: string;
   onCancel: () => void;
   onSave: () => void;
   saveLabel?: string;
   busy?: boolean;
+  hideSave?: boolean;
 }) {
   return (
     <header className="sticky top-0 z-30 flex min-h-[60px] items-center gap-3 border-b border-border bg-surface px-[18px] pt-[env(safe-area-inset-top)]">
@@ -134,7 +139,7 @@ export function FormBar({
         type="button"
         onClick={onSave}
         disabled={busy}
-        className="-mr-2 min-h-11 shrink-0 px-2 text-[13px] font-bold text-primary disabled:opacity-50"
+        className={`-mr-2 min-h-11 shrink-0 px-2 text-[13px] font-bold text-primary disabled:opacity-50 ${hideSave ? "invisible" : ""}`}
       >
         {saveLabel}
       </button>

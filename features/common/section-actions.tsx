@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, Copy, FolderInput, Layers, Pencil, Trash2, Unlink } from "lucide-react";
+import { Archive, Copy, FolderInput, Layers, Pencil, Split, Trash2, Unlink } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -11,6 +11,7 @@ import {
   deleteSection,
   duplicateSection,
   removeSectionFromPlan,
+  separateSectionInPlan,
 } from "@/data/commands/sections";
 import type { DayPlan, Section } from "@/domain/types";
 import type { PageId } from "@/lib/errors/pages";
@@ -20,7 +21,7 @@ import { useRun } from "./use-run";
 const ICON = { size: 15, strokeWidth: 1.6 } as const;
 
 export type SectionAction =
-  "edit" | "duplicate" | "copy" | "move" | "remove" | "archive" | "delete";
+  "edit" | "duplicate" | "copy" | "move" | "separate" | "remove" | "archive" | "delete";
 
 /**
  * Section actions shared by Today's ⋯ menu (handoff screen 5) and the Sections manager
@@ -46,7 +47,12 @@ export function useSectionActions(pageId: PageId) {
         });
         return;
       case "copy":
-        setSheet({ kind: "section-copy", sectionId: section.id, name: section.name });
+        setSheet({
+          kind: "section-copy",
+          sectionId: section.id,
+          name: section.name,
+          fromPlanId: plan.id,
+        });
         return;
       case "move":
         setSheet({
@@ -54,6 +60,11 @@ export function useSectionActions(pageId: PageId) {
           sectionId: section.id,
           name: section.name,
           fromPlanId: plan.id,
+        });
+        return;
+      case "separate":
+        void run(separateSectionInPlan(ctx(), { sectionId: section.id, planId: plan.id }), {
+          success: `${section.name} is now separate in ${plan.name}`,
         });
         return;
       case "remove":
@@ -72,7 +83,7 @@ export function useSectionActions(pageId: PageId) {
     }
   };
 
-  /** Menu items for a section; "Remove from this Day Plan" only when it's in other plans too. */
+  /** Menu items for a section; Separate and Remove only when it's in other plans too. */
   const menuItems = (section: Section, plan: DayPlan, inOtherPlans: boolean): MenuItem[] => [
     {
       label: "Edit section",
@@ -96,6 +107,11 @@ export function useSectionActions(pageId: PageId) {
     },
     ...(inOtherPlans
       ? [
+          {
+            label: "Separate from other Day Plans",
+            icon: <Split {...ICON} />,
+            onSelect: () => perform("separate", section, plan),
+          },
           {
             label: "Remove from this Day Plan",
             icon: <Unlink {...ICON} />,

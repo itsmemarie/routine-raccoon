@@ -2,6 +2,7 @@ import { link, plan, section } from "@/tests/factories";
 import {
   canDemotePlan,
   primaryPlan,
+  primaryPlanOn,
   resolveCopyTarget,
   sectionsOfPlan,
   survivalPlanFor,
@@ -25,6 +26,27 @@ describe("survival plans", () => {
   it("finds the primary plan", () => {
     expect(primaryPlan([bad, normal])).toBe(normal);
     expect(primaryPlan([bad])).toBeNull();
+  });
+
+  it("finds the plan that was primary on a past day", () => {
+    const first = plan({ kind: "custom", name: "First" });
+    const second = plan({ kind: "custom", name: "Second" });
+    const plans = [first, second, normal];
+    const history = [
+      { planId: first.id, until: "2026-09-05" },
+      { planId: second.id, until: "2026-09-10" },
+    ];
+    expect(primaryPlanOn(plans, "2026-09-04", history)).toBe(first);
+    expect(primaryPlanOn(plans, "2026-09-05", history)).toBe(second);
+    expect(primaryPlanOn(plans, "2026-09-09", history)).toBe(second);
+    expect(primaryPlanOn(plans, "2026-09-10", history)).toBe(normal);
+    expect(primaryPlanOn(plans, "2026-09-04", [])).toBe(normal);
+  });
+
+  it("falls back to today's primary when the earlier plan was deleted", () => {
+    const gone = plan({ kind: "custom", deleted_at: "2026-09-06T00:00:00Z" });
+    const history = [{ planId: gone.id, until: "2026-09-05" }];
+    expect(primaryPlanOn([gone, normal], "2026-09-04", history)).toBe(normal);
   });
 
   it("protects the primary plan", () => {
@@ -51,7 +73,7 @@ describe("sectionsOfPlan", () => {
   });
 });
 
-describe("resolveCopyTarget (handoff: Survival copies)", () => {
+describe("resolveCopyTarget (handoff: Task copies)", () => {
   const target = plan({ kind: "survival", survival_level: 1 });
 
   it("uses the section with the same name (case-insensitive)", () => {

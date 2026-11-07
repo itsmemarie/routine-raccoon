@@ -136,7 +136,6 @@ export function SetupScreen() {
           neverShrink: false,
           smaller: { minutes: null, text: answers.smaller },
         },
-        copyToLevels: [],
       }),
       { onInputError: setError, success: (v) => `Added to ${v.sectionName}` },
     );

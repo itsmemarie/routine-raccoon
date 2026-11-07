@@ -22,13 +22,14 @@ import {
   sectionMovedCopy,
   sectionRemovedFromPlanCopy,
   sectionRestoredCopy,
+  sectionSeparatedCopy,
   sectionSkippedCopy,
   sectionUnskippedCopy,
   skippedCopy,
   survivalRenamedCopy,
   taskAddedCopy,
   taskCopiedCopy,
-  taskCopiedToSurvivalCopy,
+  taskCopyAddedCopy,
   taskDeletedCopy,
   taskDuplicatedCopy,
   taskEditedCopy,
@@ -45,7 +46,7 @@ describe("log copy (handoff wording)", () => {
     expect(taskAddedCopy({ name: "Shower", minutes: 15, hard: false }, "Morning").meta).toBe(
       "Morning · 15 min",
     );
-    expect(taskCopiedToSurvivalCopy({ name: "Eat" }, "Bad day").meta).toBe("Copy in Bad day");
+    expect(taskCopyAddedCopy({ name: "Eat" }, "Bad day").meta).toBe("Copy in Bad day");
     expect(taskEditedCopy({ name: "Eat" }, "Notes")).toMatchObject({
       kind: "edited",
       meta: "Notes",
@@ -102,6 +103,11 @@ describe("log copy (handoff wording)", () => {
     expect(sectionEditedCopy("Morning", "07:00", "every week").meta).toBe("07:00 · every week");
     expect(sectionDuplicatedCopy("Morning", "Normal").title).toBe("Duplicated section Morning");
     expect(sectionCopiedCopy("Morning", "Travelling").meta).toBe("To Travelling");
+    expect(sectionSeparatedCopy("Morning", "Travelling")).toEqual({
+      kind: "edited",
+      title: "Separated section Morning",
+      meta: "In Travelling",
+    });
     expect(sectionMovedCopy("Morning", "Travelling").kind).toBe("edited");
     expect(sectionRemovedFromPlanCopy("Morning", "Travelling").meta).toBe("From Travelling");
     expect(sectionArchivedCopy("Morning").meta).toBe("Tasks kept in the Log");

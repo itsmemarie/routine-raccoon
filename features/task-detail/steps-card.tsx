@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Plus } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { InlineText } from "@/components/ui/inline-text";
 import { GroupHeading } from "@/components/ui/layout";
 import { SortableList } from "@/components/ui/sortable-list";
@@ -23,6 +23,7 @@ export function StepsCard({
   onEdit,
   onAdd,
   onReorder,
+  onDirtyChange,
 }: {
   steps: readonly Step[];
   checked: ReadonlySet<string>;
@@ -34,14 +35,33 @@ export function StepsCard({
   onAdd: (text: string) => void;
   /** Put `stepId` right after `afterId` (null = first). */
   onReorder: (stepId: string, afterId: string | null) => void;
+  /** Typing has started or stopped being a change that isn't saved yet. */
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
   const done = steps.filter((s) => checked.has(s.id)).length;
 
+  // Same as InlineText: leaving the screen mid-typing still adds the step.
+  const pendingStep = useRef({ draft, onAdd });
+  useEffect(() => {
+    pendingStep.current = { draft, onAdd };
+  });
+  useEffect(
+    () => () => {
+      const { draft: text, onAdd: add } = pendingStep.current;
+      if (text.trim()) add(text);
+    },
+    [],
+  );
+
+  const changeDraft = (next: string) => {
+    setDraft(next);
+    onDirtyChange(next.trim() !== "");
+  };
   const addDraft = () => {
     if (draft.trim()) onAdd(draft);
-    setDraft("");
+    changeDraft("");
   };
   const finishAdd = () => {
     addDraft();
@@ -77,6 +97,7 @@ export function StepsCard({
             label={`Step ${index + 1}`}
             maxLength={300}
             onCommit={(text) => onEdit(step.id, text)}
+            onDirtyChange={onDirtyChange}
             className={`text-[13.5px] ${tone}`}
           />
         ) : (
@@ -131,7 +152,7 @@ export function StepsCard({
                 maxLength={300}
                 placeholder="Step"
                 enterKeyHint="next"
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => changeDraft(event.target.value)}
                 onBlur={finishAdd}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
@@ -140,7 +161,7 @@ export function StepsCard({
                     addDraft();
                   }
                   if (event.key === "Escape") {
-                    setDraft("");
+                    changeDraft("");
                     setAdding(false);
                   }
                 }}

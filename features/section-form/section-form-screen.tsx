@@ -160,7 +160,7 @@ function SectionForm({
   const plans = activePlans(snapshot);
   const contextPlan = plans.find((p) => p.id === contextPlanId);
   const fromTasks = section
-    ? tasksOfSection(snapshot, section.id).reduce((sum, t) => sum + t.minutes, 0)
+    ? tasksOfSection(snapshot, section.id, contextPlanId).reduce((sum, t) => sum + t.minutes, 0)
     : 0;
   const customColor = !(SECTION_COLORS as readonly string[]).includes(state.color);
   const fallback = "/";
@@ -464,8 +464,8 @@ function SectionForm({
                 })}
             </div>
             <p className="mt-[9px] text-[11.5px] leading-normal text-text-muted">
-              It&apos;s the same section in every Day Plan you pick: change it once and it changes
-              everywhere.
+              It&apos;s the same section in every Day Plan you pick: a change or a new task in one
+              shows in all of them.
             </p>
           </section>
         ) : null}

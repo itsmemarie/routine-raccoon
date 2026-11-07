@@ -186,9 +186,12 @@ function Sections({ planId }: { planId: string }) {
                         {actionButton("Duplicate", "duplicate", row)}
                         {actionButton("Copy to Day Plan", "copy", row)}
                         {actionButton("Move to Day Plan", "move", row)}
-                        {row.alsoIn.length > 0
-                          ? actionButton("Remove from this Day Plan", "remove", row)
-                          : null}
+                        {row.alsoIn.length > 0 ? (
+                          <>
+                            {actionButton("Separate from other Day Plans", "separate", row)}
+                            {actionButton("Remove from this Day Plan", "remove", row)}
+                          </>
+                        ) : null}
                         {actionButton("Archive", "archive", row)}
                         {actionButton("Delete", "delete", row, true)}
                       </div>

@@ -43,3 +43,11 @@ export function isLive(row: { deleted_at: string | null }): boolean {
 export function isActive(row: { deleted_at: string | null; archived_at: string | null }): boolean {
   return row.deleted_at === null && row.archived_at === null;
 }
+
+/**
+ * Whether a plan shows this task, given that its section is in the plan. A section can sit in
+ * several plans, and a task can be removed from some of them without leaving the others.
+ */
+export function isTaskInPlan(task: Pick<Task, "excluded_plan_ids">, planId: string): boolean {
+  return !task.excluded_plan_ids.includes(planId);
+}

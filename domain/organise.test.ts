@@ -5,10 +5,10 @@ import {
   archivedPlans,
   archivedSections,
   homePlanOf,
+  otherPlansWithTask,
   planCards,
   plansOfSection,
   sectionRows,
-  survivalPlansWithTask,
   type Organisation,
 } from "./organise";
 
@@ -106,13 +106,29 @@ describe("organise selectors", () => {
     expect(homePlanOf(org, shelf.id)).toBeNull();
   });
 
-  it("finds survival plans holding a same-named copy", () => {
+  it("finds other plans holding a same-named copy", () => {
     const { org, tasks } = world();
     const pint = tasks[0];
     if (!pint) throw new Error("fixture");
-    expect(survivalPlansWithTask(org, pint).map((p) => p.name)).toEqual(["Bad day"]);
+    expect(otherPlansWithTask(org, pint).map((p) => p.name)).toEqual(["Bad day"]);
     const dinner = tasks[3];
     if (!dinner) throw new Error("fixture");
-    expect(survivalPlansWithTask(org, dinner)).toEqual([]);
+    expect(otherPlansWithTask(org, dinner)).toEqual([]);
+  });
+
+  it("counts every kind of plan, but never one the task itself sits in", () => {
+    const { org, tasks, evening, keep } = world();
+    const dinner = tasks[3];
+    if (!dinner) throw new Error("fixture");
+    const inBadDay = task({ section_id: keep.id, name: "Dinner" });
+    expect(
+      otherPlansWithTask({ ...org, tasks: [...tasks, inBadDay] }, inBadDay).map((p) => p.name),
+    ).toEqual(["Normal"]);
+
+    // A copy in another section of Normal isn't "also in Normal". (Morning is in Travelling too.)
+    const repeat = task({ section_id: evening.id, name: "Pint" });
+    expect(
+      otherPlansWithTask({ ...org, tasks: [...tasks, repeat] }, repeat).map((p) => p.name),
+    ).toEqual(["Travelling", "Bad day"]);
   });
 });

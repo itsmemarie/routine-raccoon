@@ -4,7 +4,12 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { getDb } from "@/data/db/client";
 import { readDayInput } from "@/data/db/queries";
 import type { RoutineDb } from "@/data/db/schema";
-import { plansOfSection, survivalPlansWithTask } from "@/domain/organise";
+import {
+  otherPlansWithTask,
+  plansOfTask,
+  taskPlacement,
+  type TaskPlacement,
+} from "@/domain/organise";
 import { dayFactsReader, LOOKBACK_DAYS, skipRun } from "@/domain/progress";
 import { addDays } from "@/domain/time";
 import { buildToday, type TodayTask } from "@/domain/today";
@@ -14,8 +19,10 @@ import { toAppError } from "@/lib/errors/app-error";
 export interface TaskDetail {
   readonly task: Task;
   readonly section: Section | null;
-  /** Live plans the task's section is in. */
+  /** Live plans the task shows in. */
   readonly plans: readonly DayPlan[];
+  /** Where the task is, copies included, for the delete choice. */
+  readonly placement: TaskPlacement;
   /** Today's occurrence (ticks, checked steps), if any. */
   readonly occurrence: Occurrence | null;
   /** The task as Today shows it (minutes, shrunk, done), or null when it isn't on today's list. */
@@ -68,13 +75,14 @@ export function useTaskDetail(
         task,
         section:
           day.sections.find((s) => s.id === task.section_id && s.deleted_at === null) ?? null,
-        plans: plansOfSection(org, task.section_id),
+        plans: plansOfTask(org, task),
+        placement: taskPlacement(org, task, view.activePlan?.id ?? null),
         occurrence:
           day.occurrences.find((o) => o.task_id === taskId && o.deleted_at === null) ?? null,
         today,
         survivalOn: view.survivalOn,
         skipRun: skipRun(taskId, dayKey, factsOf),
-        alsoIn: task.survival_level === null ? survivalPlansWithTask(org, task) : [],
+        alsoIn: task.survival_level === null ? otherPlansWithTask(org, task) : [],
         settings: day.settings,
       };
     } catch (error) {

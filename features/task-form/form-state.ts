@@ -1,7 +1,7 @@
 import { DEFAULT_MANTRA } from "@/data/commands/tasks";
 import type { TaskDraft } from "@/data/commands/validate";
 import { FALLBACK_EMOJI, matchEmoji } from "@/domain/emoji";
-import type { Recurrence, SurvivalLevel, Task } from "@/domain/types";
+import type { Recurrence, Task } from "@/domain/types";
 
 export interface StepDraft {
   /** Stable React key (a saved step's id, or a client key for a new one). */
@@ -29,7 +29,10 @@ export interface TaskFormState {
   readonly neverShrink: boolean;
   readonly smallerMinutes: number | null;
   readonly smallerText: string;
-  readonly copyToLevels: readonly SurvivalLevel[];
+  /** "Also add to": other sections of the current plan. */
+  readonly copyToSectionIds: readonly string[];
+  /** "Also add to": other Day Plans. */
+  readonly copyToPlanIds: readonly string[];
 }
 
 export const MINUTE_CHOICES = [5, 15, 30, 60] as const;
@@ -58,7 +61,8 @@ export function newTaskState(planId: string | null, sectionId: string | null): T
     neverShrink: false,
     smallerMinutes: null,
     smallerText: "",
-    copyToLevels: [],
+    copyToSectionIds: [],
+    copyToPlanIds: [],
   };
 }
 
@@ -80,7 +84,8 @@ export function stateFromTask(task: Task, planId: string | null): TaskFormState 
     neverShrink: task.never_shrink,
     smallerMinutes: task.smaller_versions.minutes ?? null,
     smallerText: task.smaller_versions.text ?? "",
-    copyToLevels: [],
+    copyToSectionIds: [],
+    copyToPlanIds: [],
   };
 }
 
@@ -89,6 +94,30 @@ export function withName(state: TaskFormState, name: string): TaskFormState {
   return state.emojiChosen
     ? { ...state, name }
     : { ...state, name, emoji: matchEmoji(name) ?? FALLBACK_EMOJI };
+}
+
+/** The task's own section can't also be a copy target. */
+export function withSection(state: TaskFormState, sectionId: string): TaskFormState {
+  return {
+    ...state,
+    sectionId,
+    copyToSectionIds: state.copyToSectionIds.filter((id) => id !== sectionId),
+  };
+}
+
+/** Section picks belong to the plan they were made in, and a plan can't be its own copy. */
+export function withPlan(
+  state: TaskFormState,
+  planId: string,
+  sectionId: string | null,
+): TaskFormState {
+  return {
+    ...state,
+    planId,
+    sectionId,
+    copyToSectionIds: [],
+    copyToPlanIds: state.copyToPlanIds.filter((id) => id !== planId),
+  };
 }
 
 export function toDraft(state: TaskFormState, sectionId: string): TaskDraft {
@@ -109,7 +138,7 @@ export function toDraft(state: TaskFormState, sectionId: string): TaskDraft {
   };
 }
 
-/** True when the user changed something worth confirming before discarding. */
+/** True when the form differs from what it opened with: there is something to save or discard. */
 export function isDirty(initial: TaskFormState, current: TaskFormState): boolean {
-  return JSON.stringify({ ...initial, emoji: "" }) !== JSON.stringify({ ...current, emoji: "" });
+  return JSON.stringify(initial) !== JSON.stringify(current);
 }

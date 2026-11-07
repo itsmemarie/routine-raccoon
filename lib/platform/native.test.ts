@@ -40,9 +40,11 @@ vi.mock("@capacitor/local-notifications", () => ({
   },
 }));
 
+import { playChime, primeChime } from "./chime";
 import { onAppResume } from "./lifecycle";
 import { getNotificationScheduler } from "./notifications";
 import { isNativePlatform, platformName } from "./platform";
+import { keepScreenOn } from "./wake-lock";
 
 describe("platform adapters on Android", () => {
   it("reports the native platform", () => {
@@ -94,5 +96,27 @@ describe("platform adapters on Android", () => {
     expect(failed.ok ? null : failed.error.code).toBe("RR-NTF-002");
     const cancelFailed = await scheduler.cancel([8]);
     expect(cancelFailed.ok ? null : cancelFailed.error.code).toBe("RR-NTF-002");
+  });
+
+  it("leaves the alert to the notification: no in-app ping, no held screen", async () => {
+    const audioCreated = vi.fn();
+    const request = vi.fn();
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        constructor() {
+          audioCreated();
+        }
+      },
+    );
+    vi.stubGlobal("navigator", { wakeLock: { request } });
+
+    await primeChime();
+    await playChime();
+    keepScreenOn()();
+
+    expect(audioCreated).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

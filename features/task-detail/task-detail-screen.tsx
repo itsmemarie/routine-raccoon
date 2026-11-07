@@ -19,17 +19,17 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { SectionBoundary } from "@/components/errors/section-boundary";
-import { ConfirmDialog } from "@/components/ui/confirm";
 import { InlineText } from "@/components/ui/inline-text";
 import { GroupHeading } from "@/components/ui/layout";
 import { MenuButton } from "@/components/ui/menu";
 import { useBack } from "@/components/ui/navigation";
+import { SAVE_BAR_CLEARANCE, SaveBar } from "@/components/ui/save-bar";
 import { ScreenRoot } from "@/components/ui/screen";
 import { applyMove } from "@/components/ui/sortable-list";
 import { useToastStore } from "@/components/ui/toast-store";
 import { defaultContext } from "@/data/commands/context";
 import { skipTaskToday, tickTask, toggleStep, untickTask } from "@/data/commands/day";
-import { deleteTask, duplicateTask, patchTask } from "@/data/commands/tasks";
+import { duplicateTask, patchTask } from "@/data/commands/tasks";
 import { useEffectiveDayKey } from "@/data/hooks/use-day-key";
 import { useTaskDetail } from "@/data/hooks/use-task-detail";
 import { displayMinutes } from "@/domain/duration";
@@ -37,7 +37,7 @@ import { skipRunLabel } from "@/domain/progress";
 import { recurrenceLabel } from "@/domain/recurrence";
 import { AppError } from "@/lib/errors/app-error";
 import { copyText } from "@/lib/platform/files";
-import { showToast, useCopyMove, useRun } from "@/features/common";
+import { DeleteTaskDialog, showToast, useCopyMove, useRun } from "@/features/common";
 import { useTimerControls } from "@/features/timer";
 import { StepsCard } from "./steps-card";
 import { VideoEmbed } from "./video-embed";
@@ -78,9 +78,10 @@ function InfoRow({
 
 /**
  * Task detail (P02, handoff screens 6–9). Read mode hides empty fields except Notes and Steps,
- * which are always one tap from adding; every visible field edits in place. Steps tick for
- * today only and reorder by drag. Leaving (Done, Skip, Delete) goes back through history, so
- * Today keeps its scroll position.
+ * which are always one tap from adding; every visible field edits in place. A field saves when
+ * it loses focus, and the sticky Save is there while one holds a change. Steps tick for today
+ * only and reorder by drag. Leaving (Done, Skip, Delete) goes back through history, so Today
+ * keeps its scroll position.
  */
 export function TaskDetailScreen() {
   const params = useSearchParams();
@@ -100,6 +101,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Set while deleting, so the row vanishing doesn't flash (and report) RR-DB-005.
   const [leaving, setLeaving] = useState(false);
+  const [unsaved, setUnsaved] = useState(false);
 
   if (detail === null && leaving) return <ScreenRoot pageId={PAGE} />;
   if (detail === null) {
@@ -119,7 +121,13 @@ function TaskDetail({ taskId }: { taskId: string }) {
   const running = timer.current?.taskId === task.id;
 
   const patch = (fields: Parameters<typeof patchTask>[1]["patch"]) =>
-    void run(patchTask(ctx, { taskId: task.id, patch: fields }));
+    void run(patchTask(ctx, { taskId: task.id, patch: fields }), { success: "Saved" });
+
+  // Fields commit themselves on blur, so Save only has to end the edit.
+  const saveEdit = () => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    setUnsaved(false);
+  };
 
   const onDone = async () => {
     if (done) {
@@ -180,7 +188,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
   ];
 
   return (
-    <ScreenRoot pageId={PAGE} className="pb-10">
+    <ScreenRoot pageId={PAGE} className={SAVE_BAR_CLEARANCE}>
       <header className="sticky top-0 z-30 flex min-h-[62px] items-center gap-2.5 border-b border-border bg-surface px-4 pt-[env(safe-area-inset-top)]">
         <button
           type="button"
@@ -265,6 +273,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
               label="Task name"
               maxLength={80}
               onCommit={(name) => patch({ name })}
+              onDirtyChange={setUnsaved}
               className="font-display text-[24px] leading-[1.15] font-bold tracking-[-0.025em] text-ink"
             />
             <div className="mt-[9px] flex flex-wrap gap-1.5">
@@ -332,6 +341,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
                 label="Mantra"
                 maxLength={300}
                 onCommit={(mantra) => patch({ mantra })}
+                onDirtyChange={setUnsaved}
                 className="text-[13px] leading-normal font-bold text-primary"
               />
             ) : null}
@@ -341,9 +351,11 @@ function TaskDetail({ taskId }: { taskId: string }) {
               label="Notes"
               placeholder="Add a note"
               multiline
+              linkify
               rows={Math.min(8, Math.max(2, task.notes.split("\n").length))}
               maxLength={4000}
               onCommit={(notes) => patch({ notes })}
+              onDirtyChange={setUnsaved}
               className={`text-[13.5px] leading-[1.55] text-ink-muted ${task.mantra ? "mt-[7px]" : ""}`}
             />
             {task.video_url ? (
@@ -378,6 +390,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
           }
           onAdd={(text) => patch({ steps: [...task.steps, { text }] })}
           onReorder={(stepId, afterId) => patch({ steps: applyMove(task.steps, stepId, afterId) })}
+          onDirtyChange={setUnsaved}
         />
 
         <div className="mt-4 overflow-hidden rounded-card border border-border bg-surface">
@@ -397,6 +410,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
                 maxLength={120}
                 placeholder="Where does it happen?"
                 onCommit={(location) => patch({ location })}
+                onDirtyChange={setUnsaved}
                 className="text-[13.5px] font-medium text-ink"
               />
             </div>
@@ -421,21 +435,20 @@ function TaskDetail({ taskId }: { taskId: string }) {
         </div>
       </div>
 
+      {unsaved ? <SaveBar onSave={saveEdit} /> : null}
       {confirmDelete ? (
-        <ConfirmDialog
-          title={`Delete “${task.name}”?`}
-          body="The task and its steps are removed for good. You can skip it for today instead."
-          confirmLabel="Delete task"
+        <DeleteTaskDialog
+          pageId={PAGE}
+          task={task}
+          placement={detail.placement}
           onCancel={() => setConfirmDelete(false)}
-          onConfirm={() => {
+          onStart={() => {
             setConfirmDelete(false);
             setLeaving(true);
-            void run(deleteTask(ctx, { taskId: task.id }), {
-              success: `Deleted ${task.name}`,
-            }).then((r) => {
-              if (r.ok) back();
-              else setLeaving(false);
-            });
+          }}
+          onFinish={(ok) => {
+            if (ok) back();
+            else setLeaving(false);
           }}
         />
       ) : null}

@@ -7,6 +7,7 @@ import type {
 } from "@/data/db/schema";
 import { effectiveDayKey } from "@/domain/day";
 import { occurrenceId } from "@/domain/ids";
+import type { Organisation } from "@/domain/organise";
 import { dayKeyFor } from "@/domain/time";
 import { compareRank, rankForPosition, type Ranked } from "@/domain/rank";
 import { normalizeSettings } from "@/domain/settings";
@@ -71,6 +72,17 @@ export async function requirePlan(ctx: CommandContext, id: string): Promise<Loca
 
 export async function sectionNameOf(ctx: CommandContext, sectionId: string): Promise<string> {
   return (await ctx.db.sections.get(sectionId))?.name ?? "No section";
+}
+
+/** The definitions the domain's organising selectors read, inside this command's transaction. */
+export async function readOrganisation(ctx: CommandContext): Promise<Organisation> {
+  const [plans, planSections, sections, tasks] = await Promise.all([
+    ctx.db.day_plans.toArray(),
+    ctx.db.plan_sections.toArray(),
+    ctx.db.sections.toArray(),
+    ctx.db.tasks.toArray(),
+  ]);
+  return { plans, planSections, sections, tasks };
 }
 
 /** Live plan links of a section. */

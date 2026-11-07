@@ -240,7 +240,8 @@ export function ProgressScreen() {
 
       <Card title="Avoiding this">
         <p className="mt-2 text-[12.5px] leading-normal text-text-muted">
-          Not done four or more days running. Days you didn&apos;t open the app don&apos;t count.
+          On your plan but not done, four or more days running. Days you didn&apos;t open the app
+          don&apos;t count.
         </p>
         {view.avoided.length === 0 ? (
           <p className="mt-3 text-[13px] font-medium text-ink-muted">

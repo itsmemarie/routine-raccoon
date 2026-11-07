@@ -113,5 +113,16 @@ export class RoutineDb extends Dexie {
             if (row.plan_id === undefined) row.plan_id = null;
           });
       });
+    // v3: tasks can leave one Day Plan while their section stays there. Not a user edit either.
+    this.version(3)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx
+          .table<Record<string, unknown>>("tasks")
+          .toCollection()
+          .modify((row) => {
+            if (row.excluded_plan_ids === undefined) row.excluded_plan_ids = [];
+          });
+      });
   }
 }

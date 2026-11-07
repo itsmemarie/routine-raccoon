@@ -59,7 +59,7 @@ all work. The **Reset prototype** button restores seed data.
 | Paste a list | **Inline only.** Paste 2+ lines into the New task name field to open a dialog. The standalone Paste screen is out of scope. |
 | Survival levels | Picking a level shows **that survival Day Plan's own sections and tasks**. Levels are **not cumulative**. |
 | Shrinking | Tasks in a survival plan show their **smaller version** (`svMins`, smaller content). |
-| "Also in Survival Mode" field | On save, the task is **copied** into the chosen survival plan(s). The copies are independent afterwards. |
+| "Also add to" field | On save, the task is **copied** into each section and Day Plan picked. The copies are independent afterwards. |
 | Extra Support | Filters Today to **hard tasks plus tasks ≥ `longAt` minutes**. The badge count uses the same rule. |
 | Undo after tick | **5 seconds.** |
 | Survival across days | A setting: **Keep Survival Mode on after the day resets**, default **off**. |
@@ -137,7 +137,7 @@ soft-deleted with `deleted_at`, and `server_*` columns are server-owned.
 |---|---|---|
 | `lists[]` (Day Plan) | `day_plans` | `kind`: `primary` (exactly one) · `survival` (with `survival_level` 1–3) · `custom` (e.g. Travelling). `rank` = user order. |
 | `sections[]` | `sections` + `plan_sections` | A section can belong to several plans via `plan_sections` (with its own `rank`). `start_time` "HH:MM". `recurrence` JSON (shape below). Section length override → add to `recurrence` JSON or a new column (`override_minutes`). |
-| `tasks[]` | `tasks` | `minutes` 1–600 · `hard` · `never_shrink` · `steps` JSON `[{id,text}]` · `smaller_versions` JSON `{minutes, steps?, text?}` (prototype `svMins`) · `mantra` · `notes` · `video_url` · `location` · `recurrence`. |
+| `tasks[]` | `tasks` | `minutes` 1–600 · `hard` · `never_shrink` · `steps` JSON `[{id,text}]` · `smaller_versions` JSON `{minutes, steps?, text?}` (prototype `svMins`) · `mantra` · `notes` · `video_url` · `location` · `recurrence` · `excluded_plan_ids` JSON (plans the task was removed from while its section stays there). |
 | `task.done`, step `done`, `skips` | `task_occurrences` | One row per task per `day_key`: `status` pending/done/skipped, `checked_step_ids`, `minutes_credited`, `survival_level_at_completion`. "Skipped N days running" is derived. Subtask ticks therefore reset each day. |
 | `survivalOn`, `level`, Close the day | `day_records` | Per `day_key`. |
 | `log[]` | `log_entries` | See log mapping below. |
@@ -256,6 +256,19 @@ _(Owner request, Oct 2026.)_
 7. Skips last for the day only: after the reset the tasks are back. They feed "Skipped N days
    running" (Task detail) and "Avoiding this" (Progress).
 
+### Saving task edits
+
+_(Owner feedback, Nov 2026.)_ A change to a task must look saved, not just be saved.
+
+1. As soon as a task has a change that isn't saved, a sticky bar appears at the bottom:
+   **"Not saved yet"** + **Save**. It stays on screen while scrolling, sits above the keyboard
+   while typing, and sits above the timer bar when a timer runs.
+2. **Task detail:** the bar appears while typing in a field. Save stores the change and shows the
+   `"Saved"` toast. Leaving the field stores it too, so nothing typed is lost; Escape cancels.
+   Changes with nothing to type (reordering steps) store at once and show the same toast.
+3. **New / Edit task:** the bar appears on any change and goes away if the change is undone. While
+   it shows, it replaces the header's Save, so there is only ever one Save on screen.
+
 ### Paste a list (inline)
 
 In **New task**, pasting text with **2 or more** parsed lines into the name field cancels the
@@ -295,25 +308,73 @@ work 💻 · write ✍️ · journal 📓 · read 📖 · plan 🗓️ · dog �
 flower 💐 · nail 💅 · leg 🪒 · phone 📱 · call 📞. Apply the same suggestion as the user types a task
 name.
 
-### Survival copies
+### Task copies
 
-The task form's survival field becomes **"Also add to {survivalName} plans"**: multi-select chips
-Bare minimum / Bad day / Zero energy (default none). Hint: `"A copy goes into each plan you pick,
-at about {max(2,round(min/2))} min."`. On save, for each selected plan:
+_(Owner feedback, Nov 2026: copies could only go to survival plans, and a task like drinking water
+repeats across sections.)_
 
-- Copy the task (new id; same content and smaller version) into the section of that plan with the
-  same name. If there isn't one, use the plan's first section. If the plan has no sections, create
-  one named after the source section.
-- Toast `"Saved · copied to Bad day"`. Write an `added` log entry per copy.
+The task form's **"Also add to"** block has two sets of multi-select chips (default none):
+
+- **Other sections in {plan}:** the current plan's other sections, plus **All sections** when there
+  are two or more.
+- **Other Day Plans:** every other active plan (primary, custom and survival) in the user's order,
+  leaving out any plan already showing the task.
+
+Hint: `"Each copy is its own task, so ticking one leaves the others alone."`, followed by
+`"In {survivalName} plans it shows at about {n} min."` when a survival plan is picked. `n` is the
+task's Survival Mode time, because only Survival Mode shrinks a task. On save:
+
+- Each pick gets a copy (new id; same content and smaller version).
+- A picked section takes the copy directly. In a picked plan the copy goes into the section with
+  the same name. If there isn't one, use the plan's first section. If the plan has no sections,
+  create one named after the source section.
+- Nowhere gets a second copy: a plan already showing the task through a shared section is skipped.
+  Edit task explains the missing plan with `"{section} is also in {plans}, so this task already
+  shows there."`; New task has its own line under Section.
+- Picking a plan the task was removed from brings the task itself back instead of copying it.
+- Picks that no longer exist are skipped, so a change from another device never blocks saving.
+- Switching plan clears the section picks. A section or plan that becomes the task's own is dropped
+  from the picks.
+- Toast `"Saved · copied to Bad day"`, or `"copied to {n} places"` past three. Write an `added` log
+  entry per copy.
 - Editing the original later does not change the copies.
+
+### Deleting a task that's in several plans
+
+_(Owner request, Nov 2026.)_ A task can show in several Day Plans in two ways: its section sits in
+those plans, or the plans hold separate copies. Deleting it asks where.
+
+1. **In one plan:** the plain confirm (screen 9).
+2. **In two or more:** the confirm says which plans, then offers **Only from {plan}**,
+   **From both plans** / **From all {n} plans**, and Cancel. Body: `"It's in Normal, Kempsage and
+   Travel. Deleting it from all of them removes it and its steps for good. You can skip it for
+   today instead."`
+3. **{plan}** is the plan Today is showing when the task is in it, else the task's first plan. It
+   is always named on the button, so the choice is never a guess.
+4. **Only from {plan}** takes the task out of that plan and nowhere else. Its section stays shared
+   and nothing else in the section changes: the task stays out of Today, totals and counts for that
+   plan, and its history stays in the Log. Toast `"Removed {name} from {plan}"`; log `Removed {name}`
+   · `From {plan}`. When that was the last plan showing it, the task is deleted; copies elsewhere stay.
+5. **From all plans** deletes the task and its copies, with one log entry. Toast
+   `"Deleted {name} from {n} plans"`.
+6. **What counts as a copy.** Copies are independent, so the name is the only link, and a name alone
+   proves nothing: people keep a task twice on purpose. A same-named task (ignoring case and outer
+   spaces) is a copy only when it shares no plan with this task and no other candidate shares a plan
+   with it. So a morning and an evening "Tidy desk" in the same plan are never deleted together.
+7. A removed task stays out of that plan when it is duplicated, or when its section is duplicated
+   or copied from that plan. It keeps its removals when moved to another section, unless that would
+   leave it in no plan at all. **Also add to** brings it back (see "Task copies").
 
 ### Timer
 
 One timer at a time, started from the card's play button or from Task detail. It counts down in
 place and in a pinned bar. Starting a second one asks first: **"Stop {current} and start
-{new}?"**. The prototype replaces silently; follow the spec. On expiry it sends a notification and
-**never auto-ticks**. It keeps running in the background. Duration = displayed minutes (shrunk in
-Survival).
+{new}?"**. The prototype replaces silently; follow the spec. On expiry it sends a notification,
+plays one quiet two-note ping with a short vibration, and **never auto-ticks**. It keeps running in
+the background. Duration = displayed minutes (shrunk in Survival).
+
+On the web the screen stays on while a timer counts down, because a locked phone freezes the app
+and the ping could not fire. The Android build relies on its scheduled notification instead.
 
 ### Drag and drop
 
@@ -335,6 +396,18 @@ Survival).
 - **⋯ menu:** Edit section · Duplicate · Copy to Day Plan · Move to Day Plan · Archive · Delete.
   Delete asks to confirm and removes the tasks. Archive keeps history. On Today the menu starts
   with **Skip today** / **Bring back skipped** (see "Skip today").
+- **Each Day Plan keeps its own tasks.** A task added in one plan stays in that plan unless the
+  user says otherwise. **Copy to Day Plan** gives the other plan its own independent copy of the
+  section and its tasks. A section is shared only when the user picks plans under **Also in** on
+  the section form. New task then says `"{section} is also in {plans}, so this task will show
+  there too."`. A shared section's menu adds **Separate from other Day Plans**, which swaps it for
+  an independent copy in this plan, in the same position; the other plans keep the original. Each
+  day ran one plan, so its history goes with that plan: the copies take over the ticks, skips and
+  carry-overs of every day this plan ran, and days another plan ran stay with the original. The
+  copies keep the original's start dates, so recurring tasks stay on the same days. Today and
+  Progress read the same before and after. A task's Activity stays with the original, because log
+  entries can't be changed. _(Owner feedback, Nov 2026: tasks added in a plan were showing up in
+  Normal.)_
 - "+ Add task" row at the end of every expanded section opens New task preset to that section
   **and to the Day Plan Today shows** (not the section's home plan). The header and bottom
   "Add task" buttons preset today's plan and the section on screen.
@@ -375,9 +448,9 @@ Read-only. Filters: All · Completed · Added · Edited · Survival Mode. Groupe
 | Survival Mode | `survival` |
 | (All only) | `closed` |
 
-Events that write entries: tick/untick, add/edit/delete/duplicate/copy/move task, skip today and
+Events that write entries: tick/untick, add/edit/delete/remove-from-plan/duplicate/copy/move task, skip today and
 bring back (a task or a whole section), paste
-import, section add/edit/duplicate/copy/move/archive/delete, plan rename/primary/survival
+import, section add/edit/duplicate/copy/move/separate/archive/delete, plan rename/primary/survival
 membership/archive/delete/restore, plan pick, reset time change, close the day, account
 created/signed in/deleted.
 
@@ -433,8 +506,8 @@ Every screen is reachable from the prototype's screen map. Screenshots are in `s
 | 6 | **Task detail** | `07`, `08` | Read mode hides empty fields, except Notes ("Add a note") and Steps (Add subtask), which are always one tap from adding. Header: back, **Edit**, ⋯. Emoji + name, tags (Hard, minutes, section, plan, location), Notes (mantra card, notes, embedded video that plays in-app), Steps (tickable, "1 of 3 done", reorder by grip, Add subtask: Enter adds and stays open for the next), info rows (Frequency, Reminder, Section, Also in, Skipped N days running), footer **Start {n} min** / **Done** |
 | 7 | Task ⋯ menu | `09` | Edit task · Duplicate · Copy to Day Plan or section · Copy link to task · View activity · Skip today · Delete task |
 | 8 | Copy / move sheet | `19` | |
-| 9 | Delete confirm | `20` | "Delete “{name}”? The task and its steps are removed for good. You can skip it for today instead." |
-| 10 | **New / Edit task** | `10`–`12`, `21` | All fields open, no accordions: Creating in (Change) · emoji + name · Estimated time 5/15/30/60/Custom · Hard toggle · Section chips + New section · Steps · Notes (mantra placeholder "One line that gets you moving", notes, video link) · Location · Frequency Every day/week/month/Custom (opens recurrence sheet) · Also add to survival plans · Delete (edit only). Mantra default for new tasks: "Done is better than perfect. I can feel embarrassed and still do this." |
+| 9 | Delete confirm | `20` | "Delete “{name}”? The task and its steps are removed for good. You can skip it for today instead." A task in several plans asks where (see "Deleting a task that's in several plans") |
+| 10 | **New / Edit task** | `10`–`12`, `21` | All fields open, no accordions: Creating in (Change) · emoji + name · Estimated time 5/15/30/60/Custom · Hard toggle · Section chips + New section · Steps · Notes (mantra placeholder "One line that gets you moving", notes, video link) · Location · Frequency Every day/week/month/Custom (opens recurrence sheet) · Also add to (other sections, other Day Plans) · Delete (edit only). Mantra default for new tasks: "Done is better than perfect. I can feel embarrassed and still do this." |
 | 11 | Paste dialog | `13` | |
 | 12 | **Add / edit section** | `14`, `15` | Section in (plan) · Name · Description · Colour · Start time · Repeats · Length override · Also in other Day Plans |
 | 13 | Custom recurrence sheet | `16` | Weekdays · n × per day/week/month/year · Ends never / after X / on date |
@@ -461,7 +534,7 @@ Build the spec column.
 | Area | Prototype does | Spec |
 |---|---|---|
 | Survival level | Filters the current plan to tasks with `svl ≤ level` (cumulative) | Shows the survival plan's own sections and tasks, not cumulative |
-| Task form survival field | "Also in Survival Mode from" single choice, used as a filter | "Also add to {survivalName} plans" multi-select, copies on save |
+| Task form survival field | "Also in Survival Mode from" single choice, used as a filter | "Also add to" multi-select of sections and Day Plans, copies on save |
 | Extra Support | Count = hard + long, but tap filters to Hard only | Count and filter both = hard or ≥ `longAt` |
 | Undo | None | 5s snackbar |
 | Repeated tasks | One card with "1 of 3 today" | Separate cards |
@@ -508,10 +581,7 @@ account.
 
 ## Still open
 
-1. **Copy to Day Plan for sections:** the schema can **link** a section into several plans
-   (`plan_sections`), so edits show everywhere. The prototype makes an independent copy. Pick one;
-   the PRD intent ("not duplicated by hand") favours linking.
-2. **Migrating the 56 Todoist tasks:** the inline paste makes importing cheap. Import as-is and
+1. **Migrating the 56 Todoist tasks:** the inline paste makes importing cheap. Import as-is and
    clean up in the app unless told otherwise.
-3. Should a Survival day count as a "Full day" in Progress? (A setting per R7/R13; default: counts
+2. Should a Survival day count as a "Full day" in Progress? (A setting per R7/R13; default: counts
    as Showed up, not Full day.)

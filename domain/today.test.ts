@@ -2,8 +2,10 @@ import { dayRecord, link, occurrence, plan, section, settings, task } from "@/te
 import {
   buildPlanOptions,
   buildToday,
+  createdDayOf,
   isExtraSupport,
   isSectionSkipped,
+  resolveDayPlans,
   sectionTaskIds,
   summariseDay,
   survivalEmptyText,
@@ -464,5 +466,30 @@ describe("summariseDay", () => {
       occurrences: [occurrence({ task_id: pint.id, day_key: DAY, minutes_credited: null })],
     });
     expect(summary).toMatchObject({ ticked: 1, total: 3, minutes: 2 });
+  });
+});
+
+describe("createdDayOf", () => {
+  it("is the app day, so before the reset time it's still the day before", () => {
+    const row = { created_at: new Date("2026-09-08T01:30:00").toISOString() };
+    expect(createdDayOf(row, "02:00")).toBe("2026-09-07");
+    expect(createdDayOf(row, "00:00")).toBe("2026-09-08");
+  });
+
+  it("treats an unreadable date as long ago", () => {
+    expect(createdDayOf({ created_at: "not a date" }, "00:00")).toBe("1970-01-01");
+  });
+});
+
+describe("resolveDayPlans", () => {
+  it("only uses the primary history for a named day before the change", () => {
+    const normal = plan({ kind: "primary" });
+    const old = plan({ kind: "custom", name: "Old" });
+    const history = settings({ primaryHistory: [{ planId: old.id, until: DAY }] });
+    const activeOn = (dayKey?: string) =>
+      resolveDayPlans([normal, old], null, history, dayKey).activePlan;
+    expect(activeOn("2026-09-07")).toBe(old);
+    expect(activeOn(DAY)).toBe(normal);
+    expect(activeOn()).toBe(normal);
   });
 });
