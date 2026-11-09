@@ -115,6 +115,8 @@ export const TaskSchema = z.object({
   smaller_versions: SmallerVersionSchema,
   /** Day Plans this task was removed from while its section stays there. */
   excluded_plan_ids: z.array(UuidSchema).default([]),
+  /** Each Day Plan's own order key for this task, when it differs from `rank` (domain/task-order). */
+  plan_ranks: z.record(UuidSchema, z.string().min(1).max(200)).default({}),
   archived_at: IsoDateTimeSchema.nullable(),
   ...synced,
 });

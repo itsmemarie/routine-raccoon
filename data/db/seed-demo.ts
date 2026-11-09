@@ -312,6 +312,7 @@ export function seedDemo(
             steps: (t.steps ?? []).map((text) => ({ id: ctx.newId(), text })),
             smaller_versions: { minutes: t.smaller ?? defaultSmallerMinutes(t.minutes) },
             excluded_plan_ids: [],
+            plan_ranks: {},
             ...synced,
           });
         }

@@ -338,16 +338,34 @@ export function moveSectionToPlan(
     const section = await requireSection(ctx, input.sectionId);
     const target = await requirePlan(ctx, input.toPlanId);
     if (input.fromPlanId === target.id) return { planName: target.name };
+    const joins = !(await linksOfSection(ctx, section.id)).some((l) => l.plan_id === target.id);
     await linkSection(ctx, target.id, section.id);
     await unlinkSection(ctx, input.fromPlanId, section.id);
-    // A task removed from the plan the section leaves stays removed in the plan it joins.
+    // A task removed from the plan the section leaves stays removed in the plan it joins, and the
+    // section keeps the order that plan gave it (unless the target already showed it in its own).
     for (const task of await tasksInSection(ctx, section.id)) {
-      if (!task.excluded_plan_ids.includes(input.fromPlanId)) continue;
+      const excluded = task.excluded_plan_ids.includes(input.fromPlanId);
+      const ownRank = task.plan_ranks[input.fromPlanId];
+      if (!excluded && ownRank === undefined) continue;
+      const carried = joins ? ownRank : task.plan_ranks[target.id];
+      const { [input.fromPlanId]: _left, ...planRanks } = task.plan_ranks;
       await ctx.db.tasks.update(task.id, {
-        excluded_plan_ids: [
-          ...task.excluded_plan_ids.filter((id) => id !== input.fromPlanId && id !== target.id),
-          target.id,
-        ],
+        ...(excluded
+          ? {
+              excluded_plan_ids: [
+                ...task.excluded_plan_ids.filter(
+                  (id) => id !== input.fromPlanId && id !== target.id,
+                ),
+                target.id,
+              ],
+            }
+          : {}),
+        ...(ownRank === undefined
+          ? {}
+          : {
+              plan_ranks:
+                carried === undefined ? planRanks : { ...planRanks, [target.id]: carried },
+            }),
         ...touch(ctx),
       });
     }

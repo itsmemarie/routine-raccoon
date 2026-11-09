@@ -116,6 +116,8 @@ export function TodayScreen() {
     if (dayKey) void runPick(pickSurvivalLevel(defaultContext(), { dayKey, level }));
   };
 
+  // The order changes in the plan on screen only, not in other plans sharing the section.
+  const shownPlanId = view?.activePlan?.id ?? null;
   const onMove = useCallback(
     (move: BoardMove) => {
       void run(
@@ -123,11 +125,12 @@ export function TodayScreen() {
           taskId: move.taskId,
           sectionId: move.sectionId,
           ...(move.afterTaskId === undefined ? {} : { afterTaskId: move.afterTaskId }),
+          planId: shownPlanId,
           via: "drag",
         }),
       );
     },
-    [run],
+    [run, shownPlanId],
   );
 
   const onTick = useCallback(

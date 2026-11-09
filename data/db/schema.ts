@@ -124,5 +124,16 @@ export class RoutineDb extends Dexie {
             if (row.excluded_plan_ids === undefined) row.excluded_plan_ids = [];
           });
       });
+    // v4: each Day Plan keeps its own task order in a shared section. Not a user edit either.
+    this.version(4)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx
+          .table<Record<string, unknown>>("tasks")
+          .toCollection()
+          .modify((row) => {
+            if (row.plan_ranks === undefined) row.plan_ranks = {};
+          });
+      });
   }
 }

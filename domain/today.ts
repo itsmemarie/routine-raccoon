@@ -1,5 +1,6 @@
 import { displayMinutes, formatDuration, isShrunk } from "./duration";
 import { compareRank } from "./rank";
+import { compareTaskIn } from "./task-order";
 import { recursOn, recurrenceLabel } from "./recurrence";
 import {
   primaryPlan,
@@ -209,7 +210,7 @@ export function planTasksFor(
     return [
       {
         section,
-        rows: [...scheduled].sort(compareRank).map((task) => {
+        rows: [...scheduled].sort(compareTaskIn(plan.id)).map((task) => {
           const occurrence = occurrenceByTask.get(task.id);
           return {
             section,

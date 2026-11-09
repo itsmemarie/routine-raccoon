@@ -80,6 +80,7 @@ export function task(overrides: Partial<Task> & Pick<Task, "section_id">): Task 
     steps: [],
     smaller_versions: {},
     excluded_plan_ids: [],
+    plan_ranks: {},
     archived_at: null,
     ...synced,
     ...overrides,

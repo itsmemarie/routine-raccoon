@@ -11,6 +11,7 @@ import type { Organisation } from "@/domain/organise";
 import { dayKeyFor } from "@/domain/time";
 import { compareRank, rankForPosition, type Ranked } from "@/domain/rank";
 import { normalizeSettings } from "@/domain/settings";
+import { taskRankIn } from "@/domain/task-order";
 import type { DayKey, Occurrence, Settings } from "@/domain/types";
 import { AppError } from "@/lib/errors/app-error";
 import type { CommandContext } from "./context";
@@ -181,6 +182,101 @@ export async function placeInOrder<T extends Ranked & { _dirty: 0 | 1 }>(
     }
   }
   return rank;
+}
+
+export interface TaskSlot {
+  readonly rank: string;
+  readonly plan_ranks: Record<string, string>;
+}
+
+/**
+ * Where a task goes in `sectionId`, in the shared order and in every Day Plan that keeps its own
+ * order of the section (domain/task-order). Writes the siblings whose keys change; returns the
+ * task's own keys.
+ *
+ * - `planId`: the plan the user is looking at. When the section sits in more than one plan, the
+ *   position applies to that plan only: it gets its own order (copied from the shared one the
+ *   first time) and the other plans keep theirs. Ignored when the section isn't in that plan.
+ * - `afterTaskId` (null = first) or `index` is the position; omitted = the end. Plans other than
+ *   `planId` put the task at the end, or keep its place when `task` already sits in the section.
+ * - `everywhere`: the position (an `afterTaskId`) applies in every order, e.g. a duplicate.
+ */
+export async function placeTask(
+  ctx: CommandContext,
+  sectionId: string,
+  where: {
+    task?: LocalTask;
+    planId?: string | null;
+    afterTaskId?: string | null;
+    index?: number;
+    everywhere?: boolean;
+  } = {},
+): Promise<TaskSlot> {
+  const stays = where.task?.section_id === sectionId ? where.task : undefined;
+  const siblings = (await tasksInSection(ctx, sectionId)).filter((t) => t.id !== where.task?.id);
+  const linked = new Set((await linksOfSection(ctx, sectionId)).map((l) => l.plan_id));
+  const acting = where.planId && linked.has(where.planId) ? where.planId : null;
+  const own = new Set(
+    [...linked].filter((p) => siblings.some((t) => t.plan_ranks[p] !== undefined)),
+  );
+  if (stays) for (const p of linked) if (stays.plan_ranks[p] !== undefined) own.add(p);
+  const actingOwn = acting !== null && (own.has(acting) || linked.size > 1);
+  if (acting !== null && actingOwn) own.add(acting);
+
+  // Working copies. A plan that keeps its own order gets a key on every sibling, copied from the
+  // shared order where it had none, so all its keys come from one ordering.
+  const work = new Map(
+    siblings.map((t) => {
+      const planRanks = { ...t.plan_ranks };
+      for (const p of own) planRanks[p] ??= t.rank;
+      return [t.id, { rank: t.rank, plan_ranks: planRanks }];
+    }),
+  );
+  const at = (list: readonly { id: string }[], positional: boolean) =>
+    !positional
+      ? list.length
+      : where.afterTaskId !== undefined
+        ? indexAfter(list, where.afterTaskId)
+        : (where.index ?? list.length);
+
+  let rank: string;
+  if (stays && actingOwn) {
+    rank = stays.rank;
+  } else {
+    const list = siblings.map((t) => ({ id: t.id, rank: t.rank }));
+    const placed = rankForPosition(list, at(list, where.everywhere || !actingOwn));
+    placed.siblingRanks?.forEach((next, i) => {
+      const w = work.get(list[i]?.id ?? "");
+      if (w) w.rank = next;
+    });
+    rank = placed.rank;
+  }
+
+  const planRanks: Record<string, string> = {};
+  for (const p of own) {
+    if (stays && p !== acting) {
+      planRanks[p] = taskRankIn(stays, p);
+      continue;
+    }
+    const list = siblings
+      .map((t) => ({ id: t.id, rank: work.get(t.id)?.plan_ranks[p] ?? t.rank }))
+      .sort(compareRank);
+    const placed = rankForPosition(list, at(list, where.everywhere || p === acting));
+    placed.siblingRanks?.forEach((next, i) => {
+      const w = work.get(list[i]?.id ?? "");
+      if (w) w.plan_ranks[p] = next;
+    });
+    planRanks[p] = placed.rank;
+  }
+
+  for (const t of siblings) {
+    const w = work.get(t.id);
+    if (!w) continue;
+    if (w.rank !== t.rank || JSON.stringify(w.plan_ranks) !== JSON.stringify(t.plan_ranks)) {
+      await ctx.db.tasks.update(t.id, { rank: w.rank, plan_ranks: w.plan_ranks, ...touch(ctx) });
+    }
+  }
+  return { rank, plan_ranks: planRanks };
 }
 
 /** Index to insert at so the item lands directly after `afterId` (null → first). */

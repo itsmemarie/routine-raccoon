@@ -28,12 +28,18 @@ export function combinePlans(
         if (!keepLinks.has(link.section_id)) await linkSection(ctx, fix.keep, link.section_id);
         await unlinkSection(ctx, fix.drop, link.section_id);
       }
-      // A task removed from the retired plan stays out of the plan that replaces it.
+      // A task removed from the retired plan stays out of the plan that replaces it. The retired
+      // plan's own task order moves to it too, unless the saved plan has its own for that task.
       for (const task of await ctx.db.tasks.toArray()) {
-        if (!task.excluded_plan_ids.includes(fix.drop)) continue;
+        const excluded = task.excluded_plan_ids.includes(fix.drop);
+        const ordered = task.plan_ranks[fix.drop] !== undefined;
+        if (!excluded && !ordered) continue;
+        const { [fix.drop]: retired, ...planRanks } = task.plan_ranks;
+        if (retired !== undefined) planRanks[fix.keep] ??= retired;
         const kept = task.excluded_plan_ids.filter((id) => id !== fix.drop && id !== fix.keep);
         await ctx.db.tasks.update(task.id, {
-          excluded_plan_ids: [...kept, fix.keep],
+          ...(excluded ? { excluded_plan_ids: [...kept, fix.keep] } : {}),
+          ...(ordered ? { plan_ranks: planRanks } : {}),
           ...touch(ctx),
         });
       }

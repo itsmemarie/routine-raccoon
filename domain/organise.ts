@@ -1,4 +1,5 @@
 import { compareRank } from "./rank";
+import { compareTaskIn } from "./task-order";
 import {
   isActive,
   isLive,
@@ -43,7 +44,7 @@ export function tasksOfSection(org: Organisation, sectionId: string, planId?: st
         isActive(t) &&
         (planId === undefined || isTaskInPlan(t, planId)),
     )
-    .sort(compareRank);
+    .sort(compareTaskIn(planId));
 }
 
 export interface SectionRow {

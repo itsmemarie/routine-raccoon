@@ -16,6 +16,7 @@ import { exclusionsAfterMove, plansOfTask, taskPlacement } from "@/domain/organi
 import { importLogMeta, type PastedTaskDraft } from "@/domain/paste-parser";
 import { compareRank } from "@/domain/rank";
 import { resolveCopyTarget, sectionsOfPlan } from "@/domain/survival";
+import { compareTaskIn } from "@/domain/task-order";
 import { isActive, isTaskInPlan } from "@/domain/types";
 import { deleteKv, readKv } from "@/data/db/kv";
 import { AppError } from "@/lib/errors/app-error";
@@ -28,7 +29,7 @@ import {
   indexAfter,
   linksOfSection,
   nowIso,
-  placeInOrder,
+  placeTask,
   readOrganisation,
   requireName,
   requirePlan,
@@ -207,12 +208,11 @@ export function updateTask(
     const fields = validateTaskDraft(input.draft, ctx.newId, before.smaller_versions);
     const patch: Partial<LocalTask> = { ...fields };
     if (section.id !== before.section_id) {
-      const siblings = await tasksInSection(ctx, section.id);
+      const slot = await placeTask(ctx, section.id, { task: before });
       patch.section_id = section.id;
       patch.excluded_plan_ids = await exclusionsIn(ctx, before, section.id);
-      patch.rank = await placeInOrder(ctx, siblings, siblings.length, (sibling, next) =>
-        ctx.db.tasks.update(sibling.id, { rank: next, ...touch(ctx) }),
-      );
+      patch.rank = slot.rank;
+      patch.plan_ranks = slot.plan_ranks;
     }
     await ctx.db.tasks.update(before.id, { ...patch, ...touch(ctx) });
     const after = { ...before, ...patch };
@@ -334,14 +334,14 @@ export function duplicateTask(
 ): Promise<Result<{ taskId: string }, AppError>> {
   return runCommand(ctx, "duplicateTask", async () => {
     const task = await requireTask(ctx, input.taskId);
-    const siblings = await tasksInSection(ctx, task.section_id);
     const name = `${task.name} copy`.slice(0, LIMITS.name);
     const copy = await insertTask(
       ctx,
       task.section_id,
       { ...taskContent(task), name },
       {
-        index: indexAfter(siblings, task.id),
+        afterTaskId: task.id,
+        everywhere: true,
         freshStepIds: true,
         excludedPlanIds: task.excluded_plan_ids,
       },
@@ -383,8 +383,9 @@ export function copyTaskToPlan(
 
 /**
  * Moves a task to `sectionId`, directly after `afterTaskId` (null = first; omitted = end).
- * A move within the same section is a reorder and isn't logged; a move to another section
- * logs "Moved {task}" ("…, by drag" for drag and drop).
+ * `planId` is the Day Plan on screen: in a section shared with other plans, the new position is
+ * that plan's only (see `placeTask`). A move within the same section is a reorder and isn't
+ * logged; a move to another section logs "Moved {task}" ("…, by drag" for drag and drop).
  */
 export function moveTask(
   ctx: CommandContext,
@@ -392,26 +393,33 @@ export function moveTask(
     taskId: string;
     sectionId: string;
     afterTaskId?: string | null;
+    planId?: string | null;
     via: "drag" | "sheet";
   },
 ): Promise<Result<{ moved: boolean }, AppError>> {
   return runCommand(ctx, "moveTask", async () => {
     const task = await requireTask(ctx, input.taskId);
     const target = await requireSection(ctx, input.sectionId);
-    const siblings = (await tasksInSection(ctx, target.id)).filter((t) => t.id !== task.id);
-    const index =
-      input.afterTaskId === undefined ? siblings.length : indexAfter(siblings, input.afterTaskId);
     const changesSection = task.section_id !== target.id;
     if (!changesSection) {
-      const current = [...siblings, task].sort(compareRank).findIndex((t) => t.id === task.id);
-      if (current === index) return { moved: false };
+      // Compare against the order the user is looking at: the plan's when the section is in it.
+      const inView = (await linksOfSection(ctx, target.id)).some((l) => l.plan_id === input.planId);
+      const order = compareTaskIn(inView ? input.planId : null);
+      const all = (await tasksInSection(ctx, target.id)).sort(order);
+      const siblings = all.filter((t) => t.id !== task.id);
+      const index =
+        input.afterTaskId === undefined ? siblings.length : indexAfter(siblings, input.afterTaskId);
+      if (all.findIndex((t) => t.id === task.id) === index) return { moved: false };
     }
-    const rank = await placeInOrder(ctx, siblings, index, (sibling, next) =>
-      ctx.db.tasks.update(sibling.id, { rank: next, ...touch(ctx) }),
-    );
+    const slot = await placeTask(ctx, target.id, {
+      task,
+      planId: input.planId ?? null,
+      ...(input.afterTaskId === undefined ? {} : { afterTaskId: input.afterTaskId }),
+    });
     await ctx.db.tasks.update(task.id, {
       section_id: target.id,
-      rank,
+      rank: slot.rank,
+      plan_ranks: slot.plan_ranks,
       ...(changesSection ? { excluded_plan_ids: await exclusionsIn(ctx, task, target.id) } : {}),
       ...touch(ctx),
     });

@@ -1,4 +1,5 @@
 import type { LocalSection, LocalTask } from "@/data/db/schema";
+import { compareTaskIn } from "@/domain/task-order";
 import { isTaskInPlan, type Section, type Task } from "@/domain/types";
 import type { CommandContext } from "./context";
 import {
@@ -6,6 +7,7 @@ import {
   linksOfSection,
   newRowStamp,
   placeInOrder,
+  placeTask,
   tasksInSection,
   touch,
 } from "./shared";
@@ -101,30 +103,32 @@ export function taskContent(task: Task) {
 }
 
 /**
- * Inserts a task into `sectionId` at `index` (default: end). Step ids are re-minted for copies
- * so ticking a step on one copy never ticks it on another.
+ * Inserts a task into `sectionId` (default: at the end; see `placeTask` for `afterTaskId`,
+ * `everywhere` and `planId`). Step ids are re-minted for copies so ticking a step on one copy
+ * never ticks it on another.
  */
 export async function insertTask(
   ctx: CommandContext,
   sectionId: string,
   content: ReturnType<typeof taskContent>,
   options: {
-    index?: number;
+    afterTaskId?: string;
+    everywhere?: boolean;
+    planId?: string;
     freshStepIds?: boolean;
     excludedPlanIds?: readonly string[];
   } = {},
 ): Promise<LocalTask> {
-  const siblings = await tasksInSection(ctx, sectionId);
-  const rank = await placeInOrder(
-    ctx,
-    siblings,
-    options.index ?? siblings.length,
-    (sibling, next) => ctx.db.tasks.update(sibling.id, { rank: next, ...touch(ctx) }),
-  );
+  const slot = await placeTask(ctx, sectionId, {
+    ...(options.afterTaskId === undefined ? {} : { afterTaskId: options.afterTaskId }),
+    ...(options.everywhere ? { everywhere: true } : {}),
+    ...(options.planId === undefined ? {} : { planId: options.planId }),
+  });
   const row: LocalTask = {
     id: ctx.newId(),
     section_id: sectionId,
-    rank,
+    rank: slot.rank,
+    plan_ranks: slot.plan_ranks,
     ...content,
     steps: options.freshStepIds
       ? content.steps.map((s) => ({ id: ctx.newId(), text: s.text }))
@@ -154,7 +158,7 @@ export function sectionContent(section: Section) {
 
 /**
  * Copies every live task of `fromSectionId` into `toSectionId`, keeping order. With `planId`,
- * copies the section as that plan shows it, so a task removed from the plan stays out of the copy.
+ * copies the section as that plan shows it: in its order, and without the tasks removed from it.
  */
 export async function copySectionTasks(
   ctx: CommandContext,
@@ -162,9 +166,9 @@ export async function copySectionTasks(
   toSectionId: string,
   planId?: string,
 ): Promise<{ original: LocalTask; copy: LocalTask }[]> {
-  const tasks = (await tasksInSection(ctx, fromSectionId)).filter(
-    (t) => t.archived_at === null && (planId === undefined || isTaskInPlan(t, planId)),
-  );
+  const tasks = (await tasksInSection(ctx, fromSectionId))
+    .filter((t) => t.archived_at === null && (planId === undefined || isTaskInPlan(t, planId)))
+    .sort(compareTaskIn(planId));
   const pairs: { original: LocalTask; copy: LocalTask }[] = [];
   for (const original of tasks) {
     const copy = await insertTask(ctx, toSectionId, taskContent(original), { freshStepIds: true });

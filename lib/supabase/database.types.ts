@@ -145,6 +145,8 @@ type TaskRow = {
   smaller_versions: Json;
   /** Day Plans the task was removed from while its section stays there. */
   excluded_plan_ids: Json;
+  /** Each Day Plan's own order key for the task: { [planId]: rank }. */
+  plan_ranks: Json;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -253,6 +255,7 @@ export type Database = {
         | "steps"
         | "smaller_versions"
         | "excluded_plan_ids"
+        | "plan_ranks"
         | "archived_at"
         | "deleted_at",
         [
