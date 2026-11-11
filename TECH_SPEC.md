@@ -190,16 +190,16 @@ erDiagram
   user_settings ||--|| user : one
 ```
 
-| Table              | Key                               | Purpose / notable columns                                                                                                                                                                |
-| ------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `day_plans`        | `id`                              | `kind` primary/survival/custom; `survival_level` 1–3 iff survival; `rank`; exactly one live primary (unique partial index)                                                               |
-| `sections`         | `id`                              | `color`, `start_time` "HH:MM", `recurrence` JSON, `notify_on_start`, `notify_before_close`, `closing_lead_minutes`                                                                       |
-| `plan_sections`    | `(plan_id, section_id)`           | Links a section into several plans, with its own `rank`                                                                                                                                  |
-| `tasks`            | `id`                              | `section_id`, `rank`, `minutes` 1–600, `hard`, `never_shrink`, `steps` JSON, `smaller_versions` JSON, `mantra`, `notes`, `video_url`, `location`, `recurrence`, `excluded_plan_ids` JSON |
-| `task_occurrences` | `id`, unique `(task_id, day_key)` | `status` pending/done/skipped, `checked_step_ids`, `minutes_credited`, `survival_level_at_completion`, `carried_from_day_key`                                                            |
-| `day_records`      | `(user_id, day_key)`              | `survival_on`, `survival_level`, `closed_at`                                                                                                                                             |
-| `log_entries`      | `id`                              | Append-only (no UPDATE grant). `kind` ∈ completed, uncompleted, skipped, added, edited, imported, survival, closed                                                                       |
-| `user_settings`    | `user_id`                         | `settings` JSON                                                                                                                                                                          |
+| Table              | Key                               | Purpose / notable columns                                                                                                                                                                                                        |
+| ------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `day_plans`        | `id`                              | `kind` primary/survival/custom; `survival_level` 1–3 iff survival; `rank`; exactly one live primary (unique partial index)                                                                                                       |
+| `sections`         | `id`                              | `color`, `start_time` "HH:MM", `recurrence` JSON, `notify_on_start`, `notify_before_close`, `closing_lead_minutes`                                                                                                               |
+| `plan_sections`    | `(plan_id, section_id)`           | Links a section into several plans, with its own `rank`                                                                                                                                                                          |
+| `tasks`            | `id`                              | `section_id`, `rank`, `minutes` 1–600, `hard`, `never_shrink`, `steps` JSON, `smaller_versions` JSON, `mantra`, `notes`, `video_url`, `location`, `recurrence`, `excluded_plan_ids` JSON, `plan_ranks` JSON, `link_id` uuid null |
+| `task_occurrences` | `id`, unique `(task_id, day_key)` | `status` pending/done/skipped, `checked_step_ids`, `minutes_credited`, `survival_level_at_completion`, `carried_from_day_key`                                                                                                    |
+| `day_records`      | `(user_id, day_key)`              | `survival_on`, `survival_level`, `closed_at`                                                                                                                                                                                     |
+| `log_entries`      | `id`                              | Append-only (no UPDATE grant). `kind` ∈ completed, uncompleted, skipped, added, edited, imported, survival, closed                                                                                                               |
+| `user_settings`    | `user_id`                         | `settings` JSON                                                                                                                                                                                                                  |
 
 Server conventions (enforced by the `stamp` trigger, `make_synced()` and grants):
 
@@ -220,6 +220,8 @@ Server conventions (enforced by the `stamp` trigger, `make_synced()` and grants)
 Until it is applied, `HARDENING_MIGRATION_APPLIED = false` in `data/sync/mapping.ts` keeps columns 3–4 local-only (never pushed, preserved on pull). After applying: flip the flag and regenerate `database.types.ts`.
 
 **Applied migration** (`supabase/migrations/20261106221822_routine_raccoon_task_plan_removals.sql`, on production since 6 Nov 2026): adds `tasks.excluded_plan_ids jsonb not null default '[]'`, the Day Plans a task was removed from while its section stays there. It syncs with the rest of the row, so "Only from {plan}" reaches every device.
+
+**Applied migration** (`supabase/migrations/20261111155104_routine_raccoon_task_links.sql`, on production since 11 Nov 2026): adds `tasks.link_id uuid null` (+ a partial index), the link shared by coupled task copies (handoff "Coupling"). No default and no backfill. After a pull, the sync engine reconciles any link whose copies differ (the most recent edit wins) and pushes the result.
 
 **Proposed migration** (`supabase/migrations/20261004120000_routine_raccoon_account_rpcs.sql`, _not applied_; needs approval): the two account RPCs in §2.7, a private rate-limit table, and owner-only DELETE policies used by `delete_my_account()` (clients still have no DELETE grant). The app already calls these RPCs and degrades to `RR-AUTH-006` / `RR-AUTH-007` while they are missing.
 
@@ -251,7 +253,7 @@ Settings    = { showLevel=true /* "Ask which kind of day it is" prompt on Today 
 - Local rows omit `user_id`, `server_seq` and `server_updated_at`, and add `_dirty: 0|1` (numeric so IndexedDB can index it).
 - Local primary keys: `day_records` → `day_key`; `user_settings` → `key='me'`.
 - Extra local-only tables: `kv` (timer, last `day_key`, dismissed prompts, `sync_owner`, `last_synced_at`, `pending_initial_pull`, `sync_quarantine`; each value Zod-checked on read) and `sync_state` (pull cursor per table).
-- Schema changes bump the Dexie version with an `upgrade()` step. A failure there maps to `RR-DB-004`. v2 fills `sections.length_override_minutes` and `day_records.plan_id` with `null` on v1 rows without marking them dirty. v3 fills `tasks.excluded_plan_ids` with `[]` the same way.
+- Schema changes bump the Dexie version with an `upgrade()` step. A failure there maps to `RR-DB-004`. v2 fills `sections.length_override_minutes` and `day_records.plan_id` with `null` on v1 rows without marking them dirty. v3 fills `tasks.excluded_plan_ids` with `[]` the same way, v4 `tasks.plan_ranks` with `{}`, and v5 indexes `tasks.link_id` and fills it with `null`.
 
 ### 2.4 Day lifecycle (handoff "Regeneration")
 
@@ -282,7 +284,8 @@ Errors map to `RR-DB-002/003`.
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Day                | `tickTask`, `untickTask`, `skipTaskToday`, `unskipTaskToday`, `skipSectionToday`, `unskipSectionToday`, `toggleStep`, `pickPlan`, `pickSurvivalLevel`, `setSurvivalMode`, `closeDay`, `rolloverDay`, `dismissDayPrompt` |
 | Tasks              | `createTask` (+ copies), `updateTask`, `patchTask`, `deleteTask` (every plan, copies included), `removeTaskFromPlan`, `duplicateTask`, `copyTaskToPlan`, `moveTask` (reorder and move), `importPastedList`              |
-| Sections           | `createSection`, `updateSection`, `duplicateSection`, `linkSectionToPlan`, `moveSectionToPlan`, `removeSectionFromPlan`, `reorderSection`, `archiveSection`, `restoreSection`, `deleteSection`                          |
+| Sections           | `createSection`, `updateSection`, `duplicateSection`, `copySectionToPlan`, `separateSectionInPlan`, `moveSectionToPlan`, `removeSectionFromPlan`, `reorderSection`, `archiveSection`, `restoreSection`, `deleteSection` |
+| Coupling           | `applyTaskCoupling` (linked copies; decouple), `applySectionCoupling` (link / Separate), `revertCoupling` (Undo); `updateTask` and `patchTask` write shared fields to every copy of a link                              |
 | Plans              | `createPlan`, `renamePlan`, `setPlanDescription`, `makePrimary`, `setSurvivalMembership`, `duplicatePlan`, `reorderPlan`, `archivePlan`, `deletePlan`, `restorePlan`                                                    |
 | Timer · device     | `startTimer`, `stopTimer`, `markTimerAlerted`, `writeKvCommand` (device-only: not synced, not logged)                                                                                                                   |
 | Settings / account | `updateSettings`, `prepareExport` (JSON, tasks CSV, log CSV), `combinePlans`, `adoptAllRows`, `clearSyncedData`, `forgetAccount`, `logAccountEvent`, `retryQuarantined`                                                 |
@@ -574,11 +577,11 @@ sequenceDiagram
 
 ## 8. Open decisions (product)
 
-| #   | Question                                                                                                               | Engineering default if no answer                                                                      |
-| --- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Q1  | Section "Copy to Day Plan": **link** (edits show everywhere, uses `plan_sections`) or independent copy?                | **Decided (owner, Nov 2026): independent copy.** Links are made only by "Also in" on the section form |
-| Q2  | Does a Survival day count as a "Full day" in Progress?                                                                 | Counts as _Showed up_, not _Full day_; a setting (`survivalCountsAsFullDay`)                          |
-| Q3  | Hosted staging backend: Supabase Pro (~$25/mo) or local-stack-only staging?                                            | Local stack in CI; no hosted staging DB                                                               |
-| Q4  | The cloud DB already holds 57 tasks / 186 occurrences. Is this the migrated Todoist data, to be treated as production? | Treated as production; never read into fixtures or tests                                              |
-| Q5  | Accept the account-enumeration trade-off of the email lookup?                                                          | Accepted with the §3.1 mitigations                                                                    |
-| Q6  | Some handoff colours fail WCAG AA contrast (§5.5). Adjust the tokens, or accept?                                       | Ship as designed; contrast is reported, not gated, until design answers                               |
+| #   | Question                                                                                                               | Engineering default if no answer                                                                                                                      |
+| --- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | Section "Copy to Day Plan": **link** (edits show everywhere, uses `plan_sections`) or independent copy?                | **Decided (owner, Nov 2026): independent copy.** Links are made only by "Coupled with" on the section form or the Coupling sheet (handoff "Coupling") |
+| Q2  | Does a Survival day count as a "Full day" in Progress?                                                                 | Counts as _Showed up_, not _Full day_; a setting (`survivalCountsAsFullDay`)                                                                          |
+| Q3  | Hosted staging backend: Supabase Pro (~$25/mo) or local-stack-only staging?                                            | Local stack in CI; no hosted staging DB                                                                                                               |
+| Q4  | The cloud DB already holds 57 tasks / 186 occurrences. Is this the migrated Todoist data, to be treated as production? | Treated as production; never read into fixtures or tests                                                                                              |
+| Q5  | Accept the account-enumeration trade-off of the email lookup?                                                          | Accepted with the §3.1 mitigations                                                                                                                    |
+| Q6  | Some handoff colours fail WCAG AA contrast (§5.5). Adjust the tokens, or accept?                                       | Ship as designed; contrast is reported, not gated, until design answers                                                                               |

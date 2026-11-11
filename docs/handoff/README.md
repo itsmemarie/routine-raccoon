@@ -337,7 +337,68 @@ task's Survival Mode time, because only Survival Mode shrinks a task. On save:
   from the picks.
 - Toast `"Saved · copied to Bad day"`, or `"copied to {n} places"` past three. Write an `added` log
   entry per copy.
-- Editing the original later does not change the copies.
+- Editing the original later does not change the copies, unless **Keep them coupled** was on (see
+  "Coupling"). That switch appears under the chips once something is picked; it is off by default.
+  When it's off, the hint ends `"A copy won't follow your edits unless you keep them coupled."`.
+
+### Coupling
+
+_(Owner request, Nov 2026: couple and decouple sections and tasks between Day Plans and sections.
+Owner decisions: a coupled task shares edits, not ticks; nothing already in the routine is coupled
+for you, so look-alike copies made before this stay independent.)_
+
+One word everywhere: **Coupled** / **Couple** / **Decouple**, with a link glyph. **Copy** keeps
+meaning independent.
+
+| Item | Coupled means | Ticks |
+| --- | --- | --- |
+| Section ↔ Day Plans | The same section in each plan (`plan_sections`): tasks, edits and ticks shared | Shared. Only one plan runs a day. |
+| Task ↔ Day Plans / sections | A copy in each place sharing one `tasks.link_id` | Each copy its own |
+
+**Coupling sheet** (title `"Where {name} lives"`). Opened from the task ⋯ menu **Couple with…**, Task
+detail's **Coupled with** row, and the section ⋯ menu **Couple with Day Plans…**. A task's sheet has
+two groups: **Other sections in {plan}** and **Other Day Plans**. A section's sheet has Other Day Plans
+only. Each row shows the place, how the item lives there, and a switch (`"Coupled in {place}"`):
+
+- **Coupled.** For a task in another plan, it also names the section the copy is in.
+- **Through the coupled section {section}.** The task shows there because its section is coupled
+  there. No switch here; **Why?** says to decouple the section, or to use Delete → Only from {plan}.
+- **Not here.** For another plan, it says where a copy would land: `"Would go to {section}"`, using the
+  same-name / first / new section rule from "Task copies". It says `"Comes back to {section}"` when the
+  task was removed from that plan; turning it on brings the task itself back.
+
+Switches only stage a change. The footer button sums it up (`"Couple to 2 · Decouple from 1"`), and
+a box above it says what will happen:
+
+- `"{places} get a coupled copy. Edits reach every copy; ticks stay separate."`
+- `"{place} keeps its own {task}; later edits won't reach it."` A decoupled copy stays where it is,
+  as its own task.
+- Section couple: `"{section} and its tasks show in {plans} too. It's one section, so ticks are
+  shared: only one Day Plan runs each day."` Tasks once removed from that plan show again.
+- Section decouple, in the warning colour: `"{section} stops being shared with {plans}: each keeps
+  its own copy and the ticks of the days it ran. This can't be undone."` This is **Separate** (see
+  "Sections"). When the section is decoupled from every other plan, this plan takes the copy and
+  the others stay coupled with each other.
+
+Saving shows one toast (`"{name} coupled with {places}"` / `"{name} decoupled from {places}"`).
+Toasts for a couple, or for a task decouple, have **Undo** (5 s); a section decouple has none. Each
+change writes an `edited` log entry, `"Coupled {name}"` · `"With {places}"`.
+
+**What a coupled task shares:** name, icon, minutes, Hard, smaller version, frequency, mantra,
+notes, video, location and steps. Each copy keeps its own section, order, plan removals,
+survival level and ticks. Steps match by position, so a ticked step stays ticked on its own copy.
+An edit anywhere (Task detail inline, Edit task) saves to every copy at once. If two phones edit
+two copies before syncing, the most recent edit wins on both.
+
+**Saying so wherever it matters:**
+
+- On Today, a coupled task card and a coupled section header show the glyph and a count
+  (`"Coupled with 2 other places"` / `"…other Day Plans"` for screen readers).
+- The Sections manager shows a `"Coupled · Travel, Kempsage"` pill.
+- On Task detail and Edit task, a banner reads `"Edits here also update {name} in {places}."`, with
+  **Edit only here** (decouples this copy, with Undo). The Save bar reads `"Saves to {n} places"`.
+- Duplicate, Copy to Day Plan, Duplicate plan and Separate always make independent (uncoupled)
+  copies. Moving a coupled task keeps it coupled. A link left with one copy is dropped.
 
 ### Deleting a task that's in several plans
 
@@ -357,7 +418,8 @@ those plans, or the plans hold separate copies. Deleting it asks where.
    · `From {plan}`. When that was the last plan showing it, the task is deleted; copies elsewhere stay.
 5. **From all plans** deletes the task and its copies, with one log entry. Toast
    `"Deleted {name} from {n} plans"`.
-6. **What counts as a copy.** Copies are independent, so the name is the only link, and a name alone
+6. **What counts as a copy.** A coupled task's copies are exactly its link (see "Coupling"); a coupled
+   task is never matched by name. Uncoupled copies are independent, so the name is the only link, and a name alone
    proves nothing: people keep a task twice on purpose. A same-named task (ignoring case and outer
    spaces) is a copy only when it shares no plan with this task and no other candidate shares a plan
    with it. So a morning and an evening "Tidy desk" in the same plan are never deleted together.
@@ -393,14 +455,17 @@ and the ping could not fire. The Android build relies on its scheduled notificat
 
 - Header row: chevron (collapse, per session) · colour dot · name · clock + start time · total
   (in the section colour) · **⋯ menu**.
-- **⋯ menu:** Edit section · Duplicate · Copy to Day Plan · Move to Day Plan · Archive · Delete.
+- **⋯ menu:** Edit section · Duplicate · Copy to Day Plan · Move to Day Plan · Couple with Day
+  Plans… · Archive · Delete. A coupled section adds Decouple from other Day Plans and Remove from
+  this Day Plan.
   Delete asks to confirm and removes the tasks. Archive keeps history. On Today the menu starts
   with **Skip today** / **Bring back skipped** (see "Skip today").
 - **Each Day Plan keeps its own tasks.** A task added in one plan stays in that plan unless the
   user says otherwise. **Copy to Day Plan** gives the other plan its own independent copy of the
-  section and its tasks. A section is shared only when the user picks plans under **Also in** on
-  the section form. New task then says `"{section} is also in {plans}, so this task will show
-  there too."`. A shared section's menu adds **Separate from other Day Plans**, which swaps it for
+  section and its tasks. A section is shared (coupled) only when the user picks plans under
+  **Coupled with** on the section form (once "Also in"), or on the Coupling sheet. New task then says `"{section} is also in {plans}, so this task will show
+  there too."`. A shared section's menu adds **Decouple from other Day Plans** (once "Separate"). It opens the
+  Coupling sheet with the other plans already switched off, so the warning is read first. It swaps the section for
   an independent copy in this plan, in the same position; the other plans keep the original. Each
   day ran one plan, so its history goes with that plan: the copies take over the ticks, skips and
   carry-overs of every day this plan ran, and days another plan ran stay with the original. The
@@ -433,7 +498,8 @@ and the ping could not fire. The Android build relies on its scheduled notificat
 From the task ⋯ menu ("Copy to Day Plan or section"): **Day Plans** chips copy the task into that
 plan's first section. If the plan has none, show the toast `"{plan} has no sections yet"`. **Move
 to a section** chips list `"{section} · {plan}"` and move the task. Section copy and move use the
-same sheet with plan chips only.
+same sheet with plan chips only. Its copies are independent; coupling has its own sheet (see
+"Coupling").
 
 ### Log
 

@@ -17,6 +17,7 @@ import { importLogMeta, type PastedTaskDraft } from "@/domain/paste-parser";
 import { compareRank } from "@/domain/rank";
 import { resolveCopyTarget, sectionsOfPlan } from "@/domain/survival";
 import { compareTaskIn } from "@/domain/task-order";
+import { linkedCopies, linkedPatch, sameLinkedContent } from "@/domain/task-links";
 import { isActive, isTaskInPlan } from "@/domain/types";
 import { deleteKv, readKv } from "@/data/db/kv";
 import { AppError } from "@/lib/errors/app-error";
@@ -62,6 +63,19 @@ export const DEFAULT_MANTRA =
 export interface CopyTargets {
   readonly sectionIds: readonly string[];
   readonly planIds: readonly string[];
+  /** "Keep them coupled": the copies share the task's edits (domain/task-links). */
+  readonly coupled?: boolean;
+}
+
+/** What a copy run wrote, so the Coupling sheet can undo it. */
+export interface CopyOutcome {
+  /** Names of the places it was added to. */
+  readonly copiedTo: string[];
+  readonly copyIds: string[];
+  /** Sections made because a picked plan had none. */
+  readonly sectionIds: string[];
+  /** Plans the task itself came back to (it had been removed from them). */
+  readonly broughtBack: string[];
 }
 
 const NO_COPIES: CopyTargets = { sectionIds: [], planIds: [] };
@@ -77,24 +91,31 @@ const NO_COPIES: CopyTargets = { sectionIds: [], planIds: [] };
  * here would leave the user unable to save. Picking a plan the task was removed from brings the
  * task itself back, no copy needed. Returns the names of the places it was added to.
  */
-async function copyTask(
+export async function copyTaskRows(
   ctx: CommandContext,
   source: LocalTask,
   dayKey: string,
-  { sectionIds, planIds }: CopyTargets = NO_COPIES,
-): Promise<string[]> {
-  if (sectionIds.length === 0 && planIds.length === 0) return [];
+  { sectionIds, planIds, coupled = false }: CopyTargets = NO_COPIES,
+): Promise<CopyOutcome> {
+  const outcome: CopyOutcome = { copiedTo: [], copyIds: [], sectionIds: [], broughtBack: [] };
+  if (sectionIds.length === 0 && planIds.length === 0) return outcome;
+  // A coupled copy joins the source's link, minted on first use (written below once a copy exists).
+  const linkId = coupled ? (source.link_id ?? ctx.newId()) : null;
   const plans = await ctx.db.day_plans.toArray();
   const planSections = await ctx.db.plan_sections.toArray();
   const sections = await ctx.db.sections.toArray();
   const sourceSection = await requireSection(ctx, source.section_id);
   const filled = new Set([source.section_id]);
-  const copiedTo: string[] = [];
+  const { copiedTo, copyIds } = outcome;
 
   for (const sectionId of new Set(sectionIds)) {
     const section = sections.find((s) => s.id === sectionId && isActive(s));
     if (!section || filled.has(section.id)) continue;
-    const copy = await insertTask(ctx, section.id, taskContent(source), { freshStepIds: true });
+    const copy = await insertTask(ctx, section.id, taskContent(source), {
+      freshStepIds: true,
+      linkId,
+    });
+    copyIds.push(copy.id);
     await appendLog(ctx, taskCopyAddedCopy(copy, section.name), {
       dayKey,
       taskId: copy.id,
@@ -115,10 +136,13 @@ async function copyTask(
     }
     if (inPlan.some((s) => filled.has(s.id))) continue;
     const target = resolveCopyTarget(sourceSection.name, plan.id, planSections, sections);
-    const sectionId =
-      target.kind === "create-section"
-        ? (await insertSection(ctx, sectionContent(sourceSection), plan.id)).id
-        : target.sectionId;
+    let sectionId: string;
+    if (target.kind === "create-section") {
+      sectionId = (await insertSection(ctx, sectionContent(sourceSection), plan.id)).id;
+      outcome.sectionIds.push(sectionId);
+    } else {
+      sectionId = target.sectionId;
+    }
     const copy = await insertTask(
       ctx,
       sectionId,
@@ -126,8 +150,13 @@ async function copyTask(
         ...taskContent(source),
         survival_level: plan.kind === "survival" ? plan.survival_level : null,
       },
-      { freshStepIds: true, excludedPlanIds: await otherPlansSharing(ctx, sectionId, plan.id) },
+      {
+        freshStepIds: true,
+        excludedPlanIds: await otherPlansSharing(ctx, sectionId, plan.id),
+        linkId,
+      },
     );
+    copyIds.push(copy.id);
     await appendLog(ctx, taskCopyAddedCopy(copy, plan.name), {
       dayKey,
       taskId: copy.id,
@@ -136,13 +165,38 @@ async function copyTask(
     filled.add(sectionId);
     copiedTo.push(plan.name);
   }
-  if (broughtBack.size > 0) {
+  const joinsLink = linkId !== null && copyIds.length > 0 && source.link_id !== linkId;
+  if (broughtBack.size > 0 || joinsLink) {
     await ctx.db.tasks.update(source.id, {
-      excluded_plan_ids: source.excluded_plan_ids.filter((id) => !broughtBack.has(id)),
+      ...(broughtBack.size > 0
+        ? { excluded_plan_ids: source.excluded_plan_ids.filter((id) => !broughtBack.has(id)) }
+        : {}),
+      ...(joinsLink ? { link_id: linkId } : {}),
       ...touch(ctx),
     });
   }
-  return copiedTo;
+  outcome.broughtBack.push(...broughtBack);
+  return outcome;
+}
+
+/**
+ * Writes `source`'s shared content to every copy coupled with it, in the caller's transaction.
+ * Each copy keeps its own step ids by position, so its ticked steps stay its own.
+ */
+export async function syncLinkedCopies(ctx: CommandContext, source: LocalTask): Promise<number> {
+  if (source.link_id === null) return 0;
+  const members = linkedCopies(
+    await ctx.db.tasks.where("link_id").equals(source.link_id).toArray(),
+    source,
+  );
+  for (const member of members) {
+    if (sameLinkedContent(member, source)) continue;
+    await ctx.db.tasks.update(member.id, {
+      ...linkedPatch(source, member, ctx.newId),
+      ...touch(ctx),
+    });
+  }
+  return members.length;
 }
 
 export function createTask(
@@ -159,7 +213,7 @@ export function createTask(
       taskId: task.id,
       sectionId: section.id,
     });
-    const copiedTo = await copyTask(ctx, task, dayKey, input.copyTo);
+    const { copiedTo } = await copyTaskRows(ctx, task, dayKey, input.copyTo);
     return { taskId: task.id, sectionName: section.name, copiedTo };
   });
 }
@@ -216,13 +270,14 @@ export function updateTask(
     }
     await ctx.db.tasks.update(before.id, { ...patch, ...touch(ctx) });
     const after = { ...before, ...patch };
+    await syncLinkedCopies(ctx, after);
     const dayKey = await currentDayKey(ctx);
     await appendLog(
       ctx,
       taskEditedCopy(after, describeTaskChange(before, after, changedLabels(before, patch))),
       { dayKey, taskId: before.id, sectionId: section.id },
     );
-    const copiedTo = await copyTask(ctx, after, dayKey, input.copyTo);
+    const { copiedTo } = await copyTaskRows(ctx, after, dayKey, input.copyTo);
     return { copiedTo };
   });
 }
@@ -254,6 +309,7 @@ export function patchTask(
     const labels = changedLabels(before, next);
     if (labels.length === 0) return;
     await ctx.db.tasks.update(before.id, { ...next, ...touch(ctx) });
+    await syncLinkedCopies(ctx, { ...before, ...next });
     await appendLog(ctx, taskEditedCopy({ name: next.name ?? before.name }, labels.join(", ")), {
       dayKey: await currentDayKey(ctx),
       taskId: before.id,

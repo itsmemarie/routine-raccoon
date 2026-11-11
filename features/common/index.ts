@@ -3,3 +3,10 @@ export { DeleteTaskDialog } from "./delete-task-dialog";
 export { ExportSheet } from "./export-sheet";
 export { useSectionActions, type SectionAction } from "./section-actions";
 export { showToast, useRun, type RunOptions } from "./use-run";
+export {
+  CoupledBanner,
+  CoupledMark,
+  CouplingSheet,
+  useCoupling,
+  type CouplingTarget,
+} from "./coupling-sheet";

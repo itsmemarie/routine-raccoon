@@ -117,6 +117,8 @@ export const TaskSchema = z.object({
   excluded_plan_ids: z.array(UuidSchema).default([]),
   /** Each Day Plan's own order key for this task, when it differs from `rank` (domain/task-order). */
   plan_ranks: z.record(UuidSchema, z.string().min(1).max(200)).default({}),
+  /** Coupled copies share one link id: an edit to one reaches them all (domain/task-links). */
+  link_id: UuidSchema.nullable().default(null),
   archived_at: IsoDateTimeSchema.nullable(),
   ...synced,
 });

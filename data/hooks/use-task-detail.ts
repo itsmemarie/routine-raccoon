@@ -5,6 +5,7 @@ import { getDb } from "@/data/db/client";
 import { readDayInput } from "@/data/db/queries";
 import type { RoutineDb } from "@/data/db/schema";
 import {
+  copiesOfTask,
   otherPlansWithTask,
   plansOfTask,
   taskPlacement,
@@ -30,8 +31,10 @@ export interface TaskDetail {
   readonly survivalOn: boolean;
   /** Days running it wasn't done ("Skipped" info row). */
   readonly skipRun: number;
-  /** Survival plans holding a same-named copy ("Also in"). */
+  /** Survival plans holding a same-named copy ("Also in"). Empty for a coupled task. */
   readonly alsoIn: readonly DayPlan[];
+  /** Places sharing this task's edits ("Coupled with"): "{plan} · {section}" per copy. */
+  readonly coupledWith: readonly string[];
   readonly settings: Settings;
 }
 
@@ -82,7 +85,18 @@ export function useTaskDetail(
         today,
         survivalOn: view.survivalOn,
         skipRun: skipRun(taskId, dayKey, factsOf),
-        alsoIn: task.survival_level === null ? otherPlansWithTask(org, task) : [],
+        alsoIn:
+          task.survival_level === null && task.link_id === null
+            ? otherPlansWithTask(org, task)
+            : [],
+        // Only a link couples: a same-named look-alike is never "Coupled with".
+        coupledWith: (task.link_id === null ? [] : copiesOfTask(org, task)).map((copy) => {
+          const where = plansOfTask(org, copy)
+            .map((p) => p.name)
+            .join(", ");
+          const name = day.sections.find((s) => s.id === copy.section_id)?.name ?? "";
+          return where ? `${where} · ${name}` : name;
+        }),
         settings: day.settings,
       };
     } catch (error) {

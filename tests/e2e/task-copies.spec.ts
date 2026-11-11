@@ -118,7 +118,7 @@ test.describe("Also add to", () => {
     await page.getByRole("button", { name: "Morning options" }).click();
     await page.getByRole("menuitem", { name: "Edit section" }).click();
     await page
-      .getByRole("group", { name: "Also in" })
+      .getByRole("group", { name: "Coupled with" })
       .getByRole("button", { name: "Travelling" })
       .click();
     await page.getByRole("button", { name: "Save" }).click();

@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 
 /**
- * "Separate from other Day Plans" swaps a shared section for copies, and Progress rebuilds past
+ * "Decouple from other Day Plans" (once "Separate") swaps a shared section for copies, and Progress rebuilds past
  * days from the tasks a plan holds now. On the seeded demo routine, with the clock moved on a day.
  */
 
@@ -40,8 +40,9 @@ test("separating a section keeps the plan's past days on Progress", async ({ pag
 
   await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Today" }).click();
   await page.getByRole("button", { name: "Morning options" }).click();
-  await page.getByRole("menuitem", { name: "Separate from other Day Plans" }).click();
-  await expect(page.getByTestId("toast")).toContainText("is now separate in Normal");
+  await page.getByRole("menuitem", { name: "Decouple from other Day Plans" }).click();
+  await page.getByTestId("coupling-sheet").getByRole("button", { name: "Decouple from 1" }).click();
+  await expect(page.getByTestId("toast")).toContainText("Morning decoupled from Travelling");
 
   await openProgress(page);
   await expect(pastDay(page)).toBeVisible();

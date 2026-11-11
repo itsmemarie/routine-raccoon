@@ -296,6 +296,8 @@ export function CopyToField({
   survivalName,
   onSections,
   onPlans,
+  coupled,
+  onCoupled,
 }: {
   planName: string;
   sectionName: string;
@@ -310,8 +312,11 @@ export function CopyToField({
   survivalName: string;
   onSections: (next: string[]) => void;
   onPlans: (next: string[]) => void;
+  coupled: boolean;
+  onCoupled: (next: boolean) => void;
 }) {
   const headingId = useId();
+  const coupledId = useId();
   const sectionsId = useId();
   const plansId = useId();
   if (sections.length === 0 && plans.length === 0 && alreadyIn.length === 0) return null;
@@ -382,9 +387,21 @@ export function CopyToField({
           already shows there.
         </p>
       ) : null}
+      {selectedSections.length + selectedPlans.length > 0 ? (
+        <SwitchRow
+          id={coupledId}
+          title="Keep them coupled"
+          description="Edits to this task update every copy."
+          checked={coupled}
+          onChange={onCoupled}
+          className="mt-3 rounded-card border border-border bg-surface"
+        />
+      ) : null}
       {sections.length > 0 || plans.length > 0 ? (
         <p className="mt-[9px] text-[11.5px] leading-normal text-text-muted">
-          Each copy is its own task, so ticking one leaves the others alone.
+          {coupled && selectedSections.length + selectedPlans.length > 0
+            ? "The copies share edits; ticking one leaves the others alone."
+            : "Each copy is its own task, so ticking one leaves the others alone. A copy won't follow your edits unless you keep them coupled."}
           {survivalPicked ? ` In ${survivalName} plans it shows at about ${shownMinutes} min.` : ""}
         </p>
       ) : null}

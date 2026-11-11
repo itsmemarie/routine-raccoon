@@ -1,6 +1,8 @@
 import type { RoutineDb, SyncTable } from "@/data/db/schema";
 import { SYNC_TABLES } from "@/data/db/schema";
 import { OccurrenceSchema } from "@/domain/schemas";
+import { reconcileGroup } from "@/domain/task-links";
+import type { Task } from "@/domain/types";
 import { AppError, toAppError } from "@/lib/errors/app-error";
 import type { ErrorCode } from "@/lib/errors/codes";
 import { reportError } from "@/lib/errors/report";
@@ -27,6 +29,8 @@ export interface SyncReport {
   readonly skippedInvalid: number;
   /** Occurrences sent again after the pull re-keyed them to the server's id. */
   readonly deferred: number;
+  /** Coupled copies brought back in line after the pull (domain/task-links reconcileGroup). */
+  readonly relinked?: number;
 }
 
 export interface QuarantineEntry {
@@ -111,6 +115,15 @@ export class SyncEngine {
     } catch (error) {
       return err(toAppError(error, "RR-SYNC-002"));
     }
+    const relinked = await this.reconcileLinks();
+    if (relinked > 0) {
+      // Copies brought in line by the reconcile are dirty again; send them now.
+      try {
+        await this.pushTable("tasks", report);
+      } catch (error) {
+        return err(toAppError(error, "RR-SYNC-001"));
+      }
+    }
     if (report.deferred > 0) {
       // The pull re-keyed the deferred occurrences to the server's ids; send them now.
       try {
@@ -119,7 +132,36 @@ export class SyncEngine {
         return err(toAppError(error, "RR-SYNC-001"));
       }
     }
-    return ok(report);
+    return ok({ ...report, relinked });
+  }
+
+  /** Link ids of coupled tasks the last pull brought in, waiting for reconcileLinks. */
+  private pulledLinks = new Set<string>();
+
+  /**
+   * Two devices can edit two coupled copies before either syncs; last-write-wins is per row, so
+   * the copies could stay apart. After a pull, the most recently edited copy of each link the
+   * pull touched wins, and the others take its content (as a local edit, so it syncs).
+   */
+  private async reconcileLinks(): Promise<number> {
+    const links = [...this.pulledLinks];
+    this.pulledLinks.clear();
+    if (links.length === 0) return 0;
+    const tasks = this.deps.db.tasks;
+    let changed = 0;
+    await this.deps.db.transaction("rw", tasks, async () => {
+      for (const linkId of links) {
+        const members = (await tasks.where("link_id").equals(linkId).toArray()).filter(
+          (t) => t.deleted_at === null,
+        );
+        const at = (this.deps.now?.() ?? new Date()).toISOString();
+        for (const { id, patch } of reconcileGroup<Task>(members, () => crypto.randomUUID())) {
+          await tasks.update(id, { ...patch, updated_at: at, _dirty: 1 });
+          changed++;
+        }
+      }
+    });
+    return changed;
   }
 
   private table(name: SyncTable) {
@@ -246,6 +288,9 @@ export class SyncEngine {
           // A tombstone for a row this device never had changes nothing; don't store it.
           if (!existing && typeof local.deleted_at === "string") continue;
           await table.put(preserveLocalOnly(name, remote, local, existing));
+          if (name === "tasks" && typeof local.link_id === "string") {
+            this.pulledLinks.add(local.link_id);
+          }
           report.pulled++;
         }
         await this.deps.db.sync_state.put({ table: name, cursor: highest });

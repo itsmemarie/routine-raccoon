@@ -313,6 +313,7 @@ export function seedDemo(
             smaller_versions: { minutes: t.smaller ?? defaultSmallerMinutes(t.minutes) },
             excluded_plan_ids: [],
             plan_ranks: {},
+            link_id: null,
             ...synced,
           });
         }

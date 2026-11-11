@@ -147,6 +147,8 @@ type TaskRow = {
   excluded_plan_ids: Json;
   /** Each Day Plan's own order key for the task: { [planId]: rank }. */
   plan_ranks: Json;
+  /** Coupled copies share this id; null when the task isn't coupled. */
+  link_id: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -256,6 +258,7 @@ export type Database = {
         | "smaller_versions"
         | "excluded_plan_ids"
         | "plan_ranks"
+        | "link_id"
         | "archived_at"
         | "deleted_at",
         [

@@ -135,5 +135,16 @@ export class RoutineDb extends Dexie {
             if (row.plan_ranks === undefined) row.plan_ranks = {};
           });
       });
+    // v5: coupled task copies share a link id (domain/task-links). Not a user edit either.
+    this.version(5)
+      .stores({ tasks: "id, section_id, link_id, _dirty" })
+      .upgrade(async (tx) => {
+        await tx
+          .table<Record<string, unknown>>("tasks")
+          .toCollection()
+          .modify((row) => {
+            if (row.link_id === undefined) row.link_id = null;
+          });
+      });
   }
 }

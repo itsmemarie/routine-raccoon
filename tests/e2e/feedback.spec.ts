@@ -60,7 +60,7 @@ async function shareMorningWithTravelling(page: Page) {
   await page.getByRole("button", { name: "Morning options" }).click();
   await page.getByRole("menuitem", { name: "Edit section" }).click();
   await page
-    .getByRole("group", { name: "Also in" })
+    .getByRole("group", { name: "Coupled with" })
     .getByRole("button", { name: "Travelling" })
     .click();
   await page.getByRole("button", { name: "Save" }).click();
@@ -118,8 +118,12 @@ test.describe("new tasks land where you are", () => {
     await expect(headline(page)).toContainText("7 tasks left,");
 
     await page.getByRole("button", { name: "Morning options" }).click();
-    await page.getByRole("menuitem", { name: "Separate from other Day Plans" }).click();
-    await expect(toast(page)).toContainText("Morning is now separate in Normal", {
+    await page.getByRole("menuitem", { name: "Decouple from other Day Plans" }).click();
+    await page
+      .getByTestId("coupling-sheet")
+      .getByRole("button", { name: "Decouple from 1" })
+      .click();
+    await expect(toast(page)).toContainText("Morning decoupled from Travelling", {
       timeout: 8_000,
     });
     await expect(headline(page)).toContainText("7 tasks left,");

@@ -436,7 +436,7 @@ function SectionForm({
 
         {plans.length > 1 ? (
           <section aria-labelledby={ids.plans} className="mt-5">
-            <GroupHeading id={ids.plans}>Also in</GroupHeading>
+            <GroupHeading id={ids.plans}>Coupled with</GroupHeading>
             <div
               role="group"
               aria-labelledby={ids.plans}
@@ -464,8 +464,9 @@ function SectionForm({
                 })}
             </div>
             <p className="mt-[9px] text-[11.5px] leading-normal text-text-muted">
-              It&apos;s the same section in every Day Plan you pick: a change or a new task in one
-              shows in all of them.
+              It&apos;s the same section in every Day Plan you pick: a change, a new task or a tick
+              in one shows in all of them. To give a Day Plan its own copy instead, use Copy to Day
+              Plan.
             </p>
           </section>
         ) : null}

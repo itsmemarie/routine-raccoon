@@ -291,42 +291,57 @@ export function separateSectionInPlan(
   input: { sectionId: string; planId: string },
 ): Promise<Result<void, AppError>> {
   return runCommand(ctx, "separateSectionInPlan", async () => {
-    const section = await requireSection(ctx, input.sectionId);
-    const plan = await requirePlan(ctx, input.planId);
-    const links = await linksOfSection(ctx, section.id);
-    if (!links.some((l) => l.plan_id === plan.id)) {
-      throw new AppError("RR-DB-005", { context: { entity: "plan_section" } });
-    }
-    if (links.length < 2) return;
-    const copy = await insertSection(ctx, sectionContent(section), plan.id);
-    // insertSection appended the link and may have renumbered the others: read the slot now.
-    const slot = await ctx.db.plan_sections.get([plan.id, section.id]);
-    if (slot) {
-      await ctx.db.plan_sections.update([plan.id, copy.id], {
-        rank: slot.rank,
-        created_at: slot.created_at,
-        ...touch(ctx),
-      });
-    }
-    await unlinkSection(ctx, plan.id, section.id);
-    const pairs = await copySectionTasks(ctx, section.id, copy.id, plan.id);
-    // A copy is the same routine, so it keeps the original's dates, plan link included: recurrence
-    // counts from them, and Progress only counts an open task on days it and its link existed.
-    await ctx.db.sections.update(copy.id, { created_at: section.created_at });
-    for (const pair of pairs) {
-      await ctx.db.tasks.update(pair.copy.id, { created_at: pair.original.created_at });
-    }
-    await moveHistory(ctx, pairs, plan.id);
-    // A running timer follows its task to the copy this plan now shows, or "Tick it" would tick a
-    // row nothing displays.
-    const timer = await readKv(ctx.db, "timer");
-    const moved = pairs.find((pair) => pair.original.id === timer?.taskId);
-    if (timer && moved) await writeKv(ctx.db, "timer", { ...timer, taskId: moved.copy.id });
-    await appendLog(ctx, sectionSeparatedCopy(section.name, plan.name), {
-      dayKey: await currentDayKey(ctx),
-      sectionId: copy.id,
-    });
+    await separateSectionRows(
+      ctx,
+      await requireSection(ctx, input.sectionId),
+      await requirePlan(ctx, input.planId),
+    );
   });
+}
+
+/**
+ * The body of "Separate" (and of Decouple on the Coupling sheet), inside the caller's
+ * transaction. Returns false when there was nothing to separate (the section's only plan).
+ */
+export async function separateSectionRows(
+  ctx: CommandContext,
+  section: LocalSection,
+  plan: { id: string; name: string },
+): Promise<boolean> {
+  const links = await linksOfSection(ctx, section.id);
+  if (!links.some((l) => l.plan_id === plan.id)) {
+    throw new AppError("RR-DB-005", { context: { entity: "plan_section" } });
+  }
+  if (links.length < 2) return false;
+  const copy = await insertSection(ctx, sectionContent(section), plan.id);
+  // insertSection appended the link and may have renumbered the others: read the slot now.
+  const slot = await ctx.db.plan_sections.get([plan.id, section.id]);
+  if (slot) {
+    await ctx.db.plan_sections.update([plan.id, copy.id], {
+      rank: slot.rank,
+      created_at: slot.created_at,
+      ...touch(ctx),
+    });
+  }
+  await unlinkSection(ctx, plan.id, section.id);
+  const pairs = await copySectionTasks(ctx, section.id, copy.id, plan.id);
+  // A copy is the same routine, so it keeps the original's dates, plan link included: recurrence
+  // counts from them, and Progress only counts an open task on days it and its link existed.
+  await ctx.db.sections.update(copy.id, { created_at: section.created_at });
+  for (const pair of pairs) {
+    await ctx.db.tasks.update(pair.copy.id, { created_at: pair.original.created_at });
+  }
+  await moveHistory(ctx, pairs, plan.id);
+  // A running timer follows its task to the copy this plan now shows, or "Tick it" would tick a
+  // row nothing displays.
+  const timer = await readKv(ctx.db, "timer");
+  const moved = pairs.find((pair) => pair.original.id === timer?.taskId);
+  if (timer && moved) await writeKv(ctx.db, "timer", { ...timer, taskId: moved.copy.id });
+  await appendLog(ctx, sectionSeparatedCopy(section.name, plan.name), {
+    dayKey: await currentDayKey(ctx),
+    sectionId: copy.id,
+  });
+  return true;
 }
 
 /** "Move to Day Plan": leaves `fromPlanId`, joins `toPlanId` with its tasks and settings. */

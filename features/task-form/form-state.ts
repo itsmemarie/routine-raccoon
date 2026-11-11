@@ -33,6 +33,8 @@ export interface TaskFormState {
   readonly copyToSectionIds: readonly string[];
   /** "Also add to": other Day Plans. */
   readonly copyToPlanIds: readonly string[];
+  /** "Keep them coupled": the copies share this task's edits (handoff "Coupling"). */
+  readonly copyCoupled: boolean;
 }
 
 export const MINUTE_CHOICES = [5, 15, 30, 60] as const;
@@ -63,6 +65,7 @@ export function newTaskState(planId: string | null, sectionId: string | null): T
     smallerText: "",
     copyToSectionIds: [],
     copyToPlanIds: [],
+    copyCoupled: false,
   };
 }
 
@@ -86,6 +89,7 @@ export function stateFromTask(task: Task, planId: string | null): TaskFormState 
     smallerText: task.smaller_versions.text ?? "",
     copyToSectionIds: [],
     copyToPlanIds: [],
+    copyCoupled: false,
   };
 }
 

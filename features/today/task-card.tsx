@@ -10,6 +10,7 @@ import { SwipeAction } from "@/components/ui/swipe-action";
 import type { TodayTask } from "@/domain/today";
 import type { Step } from "@/domain/types";
 import { RunningTimerPill } from "@/features/timer";
+import { CoupledMark } from "@/features/common";
 
 export interface TaskCardProps {
   readonly item: TodayTask;
@@ -91,10 +92,13 @@ export function TaskCardView({
             {task.emoji}
           </span>
           <span className="min-w-0 flex-1">
-            <span
-              className={`block truncate text-[13.5px] font-semibold ${done ? "text-text-faint line-through" : "text-ink"}`}
-            >
-              {task.name}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span
+                className={`truncate text-[13.5px] font-semibold ${done ? "text-text-faint line-through" : "text-ink"}`}
+              >
+                {task.name}
+              </span>
+              <CoupledMark count={item.coupledWith ?? 0} kind="task" />
             </span>
             {item.showHardBadge || item.showSurvivalBadge || item.meta ? (
               <span className="mt-[3px] flex flex-wrap items-center gap-1.5">

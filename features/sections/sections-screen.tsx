@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Clock, Plus } from "lucide-react";
+import { ArrowDown, ArrowUp, Clock, Link2, Plus } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -153,10 +153,18 @@ function Sections({ planId }: { planId: string }) {
                               row.section.length_override_minutes,
                               row.minutesFromTasks,
                             )}
-                            {row.alsoIn.length > 0
-                              ? ` · also in ${row.alsoIn.map((p) => p.name).join(", ")}`
-                              : ""}
                           </span>
+                          {row.alsoIn.length > 0 ? (
+                            <span
+                              data-testid="coupled-pill"
+                              className="mt-[7px] inline-flex max-w-full items-center gap-1 rounded-[6px] bg-tint px-[7px] py-[3px] text-[11px] font-semibold text-primary-dark"
+                            >
+                              <Link2 aria-hidden size={11} strokeWidth={2} className="shrink-0" />
+                              <span className="truncate">
+                                Coupled · {row.alsoIn.map((p) => p.name).join(", ")}
+                              </span>
+                            </span>
+                          ) : null}
                         </span>
                       </button>
                       <span className="flex shrink-0 flex-col gap-[5px]">
@@ -186,9 +194,10 @@ function Sections({ planId }: { planId: string }) {
                         {actionButton("Duplicate", "duplicate", row)}
                         {actionButton("Copy to Day Plan", "copy", row)}
                         {actionButton("Move to Day Plan", "move", row)}
+                        {actionButton("Couple with Day Plans…", "couple", row)}
                         {row.alsoIn.length > 0 ? (
                           <>
-                            {actionButton("Separate from other Day Plans", "separate", row)}
+                            {actionButton("Decouple from other Day Plans", "separate", row)}
                             {actionButton("Remove from this Day Plan", "remove", row)}
                           </>
                         ) : null}

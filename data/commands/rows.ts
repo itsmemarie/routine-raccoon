@@ -117,6 +117,8 @@ export async function insertTask(
     planId?: string;
     freshStepIds?: boolean;
     excludedPlanIds?: readonly string[];
+    /** Couples the new row to its source (domain/task-links). Copies are independent without it. */
+    linkId?: string | null;
   } = {},
 ): Promise<LocalTask> {
   const slot = await placeTask(ctx, sectionId, {
@@ -134,6 +136,7 @@ export async function insertTask(
       ? content.steps.map((s) => ({ id: ctx.newId(), text: s.text }))
       : content.steps,
     excluded_plan_ids: [...(options.excludedPlanIds ?? [])],
+    link_id: options.linkId ?? null,
     archived_at: null,
     ...newRowStamp(ctx),
   };

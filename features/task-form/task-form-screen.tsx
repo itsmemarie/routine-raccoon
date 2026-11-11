@@ -19,6 +19,7 @@ import { useEffectiveDayKey } from "@/data/hooks/use-day-key";
 import { useTodaySnapshot, type TodaySnapshot } from "@/data/hooks/use-today-snapshot";
 import {
   activePlans,
+  copiesOfTask,
   homePlanOf,
   plansOfSection,
   plansOfTask,
@@ -30,7 +31,7 @@ import { resolveDayPlans } from "@/domain/today";
 import { isActive, isTaskInPlan, type DayKey, type DayPlan } from "@/domain/types";
 import { parseVideoUrl } from "@/domain/video";
 import { AppError } from "@/lib/errors/app-error";
-import { DeleteTaskDialog, useRun } from "@/features/common";
+import { CoupledBanner, DeleteTaskDialog, useRun } from "@/features/common";
 import { FrequencyField } from "@/features/recurrence";
 import { EmojiPicker } from "./emoji-picker";
 import { CopyToField, inputClass, MinutesField, SmallerVersionField, StepsEditor } from "./fields";
@@ -166,6 +167,16 @@ function TaskForm({
       .map((p) => p.id),
   );
   const otherPlans = plans.filter((p) => p.id !== plan?.id);
+  // A coupled task's edits reach its copies: say where, before and while saving.
+  const coupledPlaces = savedTask?.link_id
+    ? copiesOfTask(snapshot, savedTask).map((copy) => {
+        const where = plansOfTask(snapshot, copy)
+          .map((p) => p.name)
+          .join(", ");
+        const name = snapshot.sections.find((s) => s.id === copy.section_id)?.name ?? "";
+        return where ? `${where} · ${name}` : name;
+      })
+    : [];
 
   const showError = (next: AppError) => {
     setError(next);
@@ -216,7 +227,11 @@ function TaskForm({
     setSaving(true);
     const ctx = defaultContext();
     const draft = toDraft(state, state.sectionId);
-    const copyTo = { sectionIds: state.copyToSectionIds, planIds: state.copyToPlanIds };
+    const copyTo = {
+      sectionIds: state.copyToSectionIds,
+      planIds: state.copyToPlanIds,
+      coupled: state.copyCoupled,
+    };
     const copied = (names: readonly string[]) => {
       if (names.length === 0) return "";
       return ` · copied to ${names.length > 3 ? `${names.length} places` : names.join(", ")}`;
@@ -259,6 +274,16 @@ function TaskForm({
       />
       <div ref={topRef} className="scroll-mt-20 px-3.5 pt-3.5">
         {error ? <InlineError error={error} pageId={PAGE} className="mb-3.5" /> : null}
+        {savedTask && coupledPlaces.length > 0 ? (
+          <div className="mb-3.5">
+            <CoupledBanner
+              taskId={savedTask.id}
+              taskName={savedTask.name}
+              places={coupledPlaces}
+              pageId={PAGE}
+            />
+          </div>
+        ) : null}
         <ContextCard
           label={isEdit ? "Editing in" : "Creating in"}
           value={planLabel}
@@ -446,6 +471,8 @@ function TaskForm({
           survivalName={survivalName}
           onSections={(copyToSectionIds) => update({ copyToSectionIds })}
           onPlans={(copyToPlanIds) => update({ copyToPlanIds })}
+          coupled={state.copyCoupled}
+          onCoupled={(copyCoupled) => update({ copyCoupled })}
         />
 
         {isEdit ? (
@@ -459,7 +486,15 @@ function TaskForm({
         ) : null}
       </div>
 
-      {dirty ? <SaveBar onSave={() => void save()} busy={saving} /> : null}
+      {dirty ? (
+        <SaveBar
+          onSave={() => void save()}
+          busy={saving}
+          {...(coupledPlaces.length > 0
+            ? { note: `Saves to ${coupledPlaces.length + 1} places` }
+            : {})}
+        />
+      ) : null}
       {sheet === "emoji" ? (
         <EmojiPicker
           current={state.emoji}

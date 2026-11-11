@@ -9,6 +9,7 @@ import { Dot } from "@/components/ui/layout";
 import { MenuButton, type MenuItem } from "@/components/ui/menu";
 import { formatDuration } from "@/domain/duration";
 import { isSectionSkipped, type TodaySection, type TodayTask } from "@/domain/today";
+import { CoupledMark } from "@/features/common";
 
 /** Droppable id of a section (task ids are plain uuids, so the prefix can't collide). */
 export function sectionDropId(sectionId: string): string {
@@ -104,6 +105,7 @@ export function SectionBlock({
           <span className="truncate font-display text-base font-semibold text-ink">
             {section.name}
           </span>
+          <CoupledMark count={view.coupledWith ?? 0} kind="section" />
           {section.start_time ? (
             <span className="flex shrink-0 items-center gap-1 text-[12px] font-medium text-text-muted">
               <Clock size={12} strokeWidth={1.8} aria-hidden />

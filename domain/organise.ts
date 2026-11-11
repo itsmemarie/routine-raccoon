@@ -1,4 +1,5 @@
 import { compareRank } from "./rank";
+import { linkedCopies } from "./task-links";
 import { compareTaskIn } from "./task-order";
 import {
   isActive,
@@ -98,12 +99,21 @@ const nameKey = (name: string) => name.trim().toLowerCase();
  * @see docs/handoff/README.md "Deleting a task that's in several plans"
  */
 export function copiesOfTask(org: Organisation, task: Task): Task[] {
+  const liveSectionIds = new Set(org.sections.filter(isActive).map((s) => s.id));
+  // Coupled copies are known for sure: their link, not their name, says they're this task.
+  if (task.link_id !== null) {
+    return linkedCopies(org.tasks, task).filter(
+      (t) => isActive(t) && liveSectionIds.has(t.section_id),
+    );
+  }
   const own = new Set(plansOfTask(org, task).map((p) => p.id));
   if (own.size === 0) return [];
   const wanted = nameKey(task.name);
-  const liveSections = new Set(org.sections.filter(isActive).map((s) => s.id));
   const candidates = org.tasks.flatMap((other) => {
-    if (other.id === task.id || !isActive(other) || !liveSections.has(other.section_id)) return [];
+    if (other.id === task.id || !isActive(other) || !liveSectionIds.has(other.section_id))
+      return [];
+    // A coupled task belongs to its own link; a look-alike name never pulls it in.
+    if (other.link_id !== null) return [];
     if (nameKey(other.name) !== wanted) return [];
     const planIds = plansOfTask(org, other).map((p) => p.id);
     return planIds.length > 0 && !planIds.some((id) => own.has(id))

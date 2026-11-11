@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   Pencil,
   Repeat,
+  Share2,
   SkipForward,
   Trash2,
 } from "lucide-react";
@@ -37,7 +38,14 @@ import { skipRunLabel } from "@/domain/progress";
 import { recurrenceLabel } from "@/domain/recurrence";
 import { AppError } from "@/lib/errors/app-error";
 import { copyText } from "@/lib/platform/files";
-import { DeleteTaskDialog, showToast, useCopyMove, useRun } from "@/features/common";
+import {
+  CoupledBanner,
+  DeleteTaskDialog,
+  showToast,
+  useCopyMove,
+  useCoupling,
+  useRun,
+} from "@/features/common";
 import { useTimerControls } from "@/features/timer";
 import { StepsCard } from "./steps-card";
 import { VideoEmbed } from "./video-embed";
@@ -59,20 +67,27 @@ function InfoRow({
   label,
   value,
   tone,
+  onPress,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   tone?: string;
+  /** Makes the row a button (e.g. "Coupled with" opens the Coupling sheet). */
+  onPress?: () => void;
 }) {
+  const Row = onPress ? "button" : "div";
   return (
-    <div className="flex items-center gap-[11px] border-b border-border px-[15px] py-[13px] last:border-b-0">
+    <Row
+      {...(onPress ? { type: "button" as const, onClick: onPress } : {})}
+      className="flex w-full items-center gap-[11px] border-b border-border px-[15px] py-[13px] text-left last:border-b-0"
+    >
       <span className="flex size-[26px] shrink-0 items-center justify-center rounded-[9px] bg-screen text-text-muted">
         {icon}
       </span>
       <span className="flex-1 text-[13px] font-medium text-text-muted">{label}</span>
       <span className={`text-right text-[13px] font-semibold ${tone ?? "text-ink"}`}>{value}</span>
-    </div>
+    </Row>
   );
 }
 
@@ -98,6 +113,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
   const detail = useTaskDetail(taskId, dayKey);
   const timer = useTimerControls(PAGE, dayKey);
   const copyMove = useCopyMove(PAGE);
+  const coupling = useCoupling(PAGE);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Set while deleting, so the row vanishing doesn't flash (and report) RR-DB-005.
   const [leaving, setLeaving] = useState(false);
@@ -150,6 +166,9 @@ function TaskDetail({ taskId }: { taskId: string }) {
     back();
   };
 
+  const openCoupling = () =>
+    coupling.open({ kind: "task", taskId: task.id, planId: detail.placement.current?.id ?? null });
+
   const infoRows = [
     {
       icon: <Repeat size={12} strokeWidth={1.7} />,
@@ -162,6 +181,17 @@ function TaskDetail({ taskId }: { taskId: string }) {
             icon: <ListTree size={12} strokeWidth={1.7} />,
             label: "Section",
             value: section.start_time ? `${section.name} · ${section.start_time}` : section.name,
+          },
+        ]
+      : []),
+    ...(detail.coupledWith.length > 0
+      ? [
+          {
+            icon: <Link2 size={12} strokeWidth={1.7} />,
+            label: "Coupled with",
+            value: detail.coupledWith.join("; "),
+            tone: "text-primary",
+            onPress: openCoupling,
           },
         ]
       : []),
@@ -226,8 +256,13 @@ function TaskDetail({ taskId }: { taskId: string }) {
                 copyMove.open({ kind: "task", taskId: task.id, sectionId: task.section_id }),
             },
             {
-              label: "Copy link to task",
+              label: "Couple with…",
               icon: <Link2 {...ICON} />,
+              onSelect: openCoupling,
+            },
+            {
+              label: "Copy link to task",
+              icon: <Share2 {...ICON} />,
               onSelect: () =>
                 void copyText(
                   `${window.location.origin}/task/?id=${encodeURIComponent(task.id)}`,
@@ -259,6 +294,16 @@ function TaskDetail({ taskId }: { taskId: string }) {
       </header>
 
       <div className="px-4 pt-4">
+        {detail.coupledWith.length > 0 ? (
+          <div className="mb-4">
+            <CoupledBanner
+              taskId={task.id}
+              taskName={task.name}
+              places={detail.coupledWith}
+              pageId={PAGE}
+            />
+          </div>
+        ) : null}
         <div className="flex items-start gap-3">
           <span
             aria-hidden
@@ -435,7 +480,14 @@ function TaskDetail({ taskId }: { taskId: string }) {
         </div>
       </div>
 
-      {unsaved ? <SaveBar onSave={saveEdit} /> : null}
+      {unsaved ? (
+        <SaveBar
+          onSave={saveEdit}
+          {...(detail.coupledWith.length > 0
+            ? { note: `Saves to ${detail.coupledWith.length + 1} places` }
+            : {})}
+        />
+      ) : null}
       {confirmDelete ? (
         <DeleteTaskDialog
           pageId={PAGE}
@@ -453,6 +505,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
         />
       ) : null}
       {copyMove.sheet}
+      {coupling.sheet}
       {timer.dialog}
     </ScreenRoot>
   );

@@ -38,7 +38,16 @@ function useKeyboardHeight(): number {
  * Sticky Save, shown while a task has a change that isn't saved (handoff "Saving task edits").
  * Stays on screen while scrolling, above the keyboard while typing and above the timer bar.
  */
-export function SaveBar({ onSave, busy = false }: { onSave: () => void; busy?: boolean }) {
+export function SaveBar({
+  onSave,
+  busy = false,
+  note,
+}: {
+  onSave: () => void;
+  busy?: boolean;
+  /** Replaces "Not saved yet", e.g. when saving also updates coupled copies. */
+  note?: string;
+}) {
   const keyboard = useKeyboardHeight();
   return (
     <div
@@ -49,7 +58,7 @@ export function SaveBar({ onSave, busy = false }: { onSave: () => void; busy?: b
       }`}
     >
       <span className="min-w-0 flex-1 text-[13px] font-semibold text-text-muted">
-        Not saved yet
+        {note ?? "Not saved yet"}
       </span>
       <Button
         // Keeps focus in the field. Otherwise the press blurs it, the field commits, and the bar

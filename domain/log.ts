@@ -315,3 +315,17 @@ export function matchesLogFilter(filter: LogFilter, kind: LogKind): boolean {
   const kinds = LOG_FILTER_KINDS[filter];
   return kinds === null || kinds.includes(kind);
 }
+
+/** Coupling sheet: "Coupled Vitamins · With Travel, Evening". */
+export function taskCoupledCopy(task: { name: string }, places: readonly string[]): LogCopy {
+  return { kind: "edited", title: `Coupled ${task.name}`, meta: `With ${places.join(", ")}` };
+}
+
+/** Coupling sheet or "Edit only here": the copies stop sharing edits. */
+export function taskDecoupledCopy(task: { name: string }, places: readonly string[]): LogCopy {
+  return { kind: "edited", title: `Decoupled ${task.name}`, meta: places.join(", ") };
+}
+
+export function sectionCoupledCopy(name: string, planNames: readonly string[]): LogCopy {
+  return { kind: "edited", title: `Coupled section ${name}`, meta: `With ${planNames.join(", ")}` };
+}

@@ -247,7 +247,11 @@ export function buildProgress(input: ProgressInput): ProgressView {
   for (const [taskId, counts] of habitMap) {
     const task = tasksById.get(taskId);
     if (!task) continue;
-    const key = `${nameKey(task.name)}|${nameKey(sectionsById.get(task.section_id)?.name ?? "")}`;
+    // Coupled copies are one habit by their link, wherever they sit.
+    const key =
+      task.link_id !== null
+        ? `link:${task.link_id}`
+        : `${nameKey(task.name)}|${nameKey(sectionsById.get(task.section_id)?.name ?? "")}`;
     const seen = habitRows.get(key);
     if (!seen) habitRows.set(key, { task, ...counts });
     else {

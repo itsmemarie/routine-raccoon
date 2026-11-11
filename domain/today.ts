@@ -75,6 +75,8 @@ export interface TodayTask {
   readonly meta: string;
   /** Steps not ticked yet today, in order (Extra Support shows these on the card). */
   readonly openSteps: readonly Step[];
+  /** Other places sharing this task's edits (domain/task-links); 0 when not coupled. */
+  readonly coupledWith?: number;
 }
 
 export interface TodaySection {
@@ -86,6 +88,8 @@ export interface TodaySection {
   /** The section's tasks today by status, ignoring the filter. */
   readonly counts: { readonly open: number; readonly done: number; readonly skipped: number };
   readonly remainingMinutes: number;
+  /** Other Day Plans this section is coupled into (the same section row). */
+  readonly coupledWith?: number;
   /** Copy for a section with no tasks today, otherwise null. */
   readonly emptyText: string | null;
 }
@@ -295,6 +299,20 @@ export function buildToday(input: TodayInput): TodayView {
   let extraSupportCount = 0;
   let doneCount = 0;
 
+  // Live, active members per link, so a card can say how many other places share its edits.
+  const liveSectionIds = new Set(input.sections.filter(isActive).map((s) => s.id));
+  const coupledByLink = new Map<string, number>();
+  for (const t of input.tasks) {
+    if (t.link_id === null || !isActive(t) || !liveSectionIds.has(t.section_id)) continue;
+    coupledByLink.set(t.link_id, (coupledByLink.get(t.link_id) ?? 0) + 1);
+  }
+  const plansLinking = (sectionId: string) =>
+    new Set(
+      input.planSections
+        .filter((l) => l.section_id === sectionId && isLive(l))
+        .map((l) => l.plan_id)
+        .filter((id) => input.plans.some((p) => p.id === id && isActive(p))),
+    ).size;
   const toTodayTask = (r: PlanTaskRow): TodayTask => ({
     task: r.task,
     sectionName: r.section.name,
@@ -307,6 +325,7 @@ export function buildToday(input: TodayInput): TodayView {
     showSurvivalBadge: r.shrunk,
     meta: cardMeta(r.task, r.minutes, r.shrunk, r.carried),
     openSteps: r.task.steps.filter((s) => !r.checked.has(s.id)),
+    coupledWith: r.task.link_id === null ? 0 : (coupledByLink.get(r.task.link_id) ?? 1) - 1,
   });
   const shown = (r: PlanTaskRow) => matchesFilter(filter, r.task, r.minutes, settings.longAt);
 
@@ -335,6 +354,7 @@ export function buildToday(input: TodayInput): TodayView {
     return {
       section,
       remainingMinutes: sectionRemaining,
+      coupledWith: Math.max(0, plansLinking(section.id) - 1),
       emptyText:
         rows.length > 0
           ? null

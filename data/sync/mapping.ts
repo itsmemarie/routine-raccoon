@@ -91,6 +91,7 @@ export const REMOTE_COLUMNS: Record<SyncTable, readonly string[]> = {
     "smaller_versions",
     "excluded_plan_ids",
     "plan_ranks",
+    "link_id",
     "archived_at",
     "created_at",
     "updated_at",
